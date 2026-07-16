@@ -8,8 +8,17 @@ type Quality = {
   resolution?: string;
   bandwidth?: number;
   duration?: string;
+  estimatedBytes?: number;
   url: string;
 };
+
+function formatBytes(n?: number): string {
+  if (!n || n <= 0) return "";
+  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1)} GB`;
+  if (n >= 1_000_000) return `${Math.round(n / 1_000_000)} MB`;
+  if (n >= 1_000) return `${Math.round(n / 1_000)} KB`;
+  return `${n} B`;
+}
 
 type Video = {
   id: string;
@@ -508,8 +517,16 @@ export default function App() {
                               {suggestedFileName(probe?.nameSlug, focusQuality, v.id)}
                             </code>
                           )}
-                          {focusQuality?.duration && (
-                            <p className="status">Duration ~ {focusQuality.duration}</p>
+                          {(focusQuality?.duration || focusQuality?.estimatedBytes) && (
+                            <p className="status">
+                              {[
+                                focusQuality?.duration && `Duration ~ ${focusQuality.duration}`,
+                                focusQuality?.estimatedBytes &&
+                                  `Size ~ ${formatBytes(focusQuality.estimatedBytes)}`,
+                              ]
+                                .filter(Boolean)
+                                .join(" · ")}
+                            </p>
                           )}
                         </div>
                       </div>

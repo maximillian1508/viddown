@@ -190,11 +190,11 @@ func qualityLabel(q Quality, index, total int) string {
 	if q.Resolution != "" {
 		parts = append(parts, prettyResolution(q.Resolution))
 	}
-	if q.Bandwidth > 0 {
+	if q.Bandwidth >= minBandwidthForEstimate {
 		if q.Bandwidth >= 1_000_000 {
 			parts = append(parts, fmt.Sprintf("%.1f Mbps", float64(q.Bandwidth)/1_000_000))
 		} else {
-			parts = append(parts, fmt.Sprintf("%d kbps", q.Bandwidth/1000))
+			parts = append(parts, fmt.Sprintf("%d kbps", (q.Bandwidth+500)/1000))
 		}
 	}
 	if q.Duration != "" {
@@ -238,47 +238,167 @@ func prettyResolution(res string) string {
 	}
 }
 
+// minBandwidthForEstimate rejects ffprobe bit_rate on .m3u8 manifests (often ~hundreds of bps).
+const minBandwidthForEstimate = 50_000
+
 func enrichQuality(q *Quality) {
-	if q.Resolution != "" && q.Duration != "" {
-		return
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 	defer cancel()
 
-	args := []string{"-v", "quiet", "-print_format", "json", "-show_format", "-show_streams"}
-	args = appendInputArgs(args, q.Headers, q.URL)
+	needProbe := q.Resolution == "" || q.Duration == "" || q.Bandwidth < minBandwidthForEstimate
+	if needProbe {
+		args := []string{"-v", "quiet", "-print_format", "json", "-show_format", "-show_streams"}
+		args = appendInputArgs(args, q.Headers, q.URL)
 
-	cmd := ffprobeCommand(ctx, args...)
-	out, err := cmd.Output()
-	if err != nil {
-		return
-	}
-	var result struct {
-		Format struct {
-			Duration string `json:"duration"`
-		} `json:"format"`
-		Streams []struct {
-			CodecType string `json:"codec_type"`
-			Width     int    `json:"width"`
-			Height    int    `json:"height"`
-		} `json:"streams"`
-	}
-	if err := json.Unmarshal(out, &result); err != nil {
-		return
-	}
-	if q.Resolution == "" {
-		for _, s := range result.Streams {
-			if s.CodecType == "video" && s.Width > 0 && s.Height > 0 {
-				q.Resolution = fmt.Sprintf("%dx%d", s.Width, s.Height)
-				break
+		cmd := ffprobeCommand(ctx, args...)
+		out, err := cmd.Output()
+		if err == nil {
+			var result struct {
+				Format struct {
+					Duration string `json:"duration"`
+					BitRate  string `json:"bit_rate"`
+				} `json:"format"`
+				Streams []struct {
+					CodecType string `json:"codec_type"`
+					Width     int    `json:"width"`
+					Height    int    `json:"height"`
+					BitRate   string `json:"bit_rate"`
+				} `json:"streams"`
+			}
+			if err := json.Unmarshal(out, &result); err == nil {
+				if q.Resolution == "" {
+					for _, s := range result.Streams {
+						if s.CodecType == "video" && s.Width > 0 && s.Height > 0 {
+							q.Resolution = fmt.Sprintf("%dx%d", s.Width, s.Height)
+							break
+						}
+					}
+				}
+				if q.Duration == "" && result.Format.Duration != "" {
+					if sec, err := strconv.ParseFloat(result.Format.Duration, 64); err == nil && sec > 0 {
+						q.Duration = formatDuration(sec)
+					}
+				}
+				if q.Bandwidth < minBandwidthForEstimate {
+					q.Bandwidth = maxProbeBitrate(result.Format.BitRate, result.Streams)
+				}
 			}
 		}
 	}
-	if q.Duration == "" && result.Format.Duration != "" {
-		if sec, err := strconv.ParseFloat(result.Format.Duration, 64); err == nil && sec > 0 {
-			q.Duration = formatDuration(sec)
+	if q.Bandwidth < minBandwidthForEstimate {
+		if seg := firstMediaSegmentURL(q.URL, q.Headers); seg != "" {
+			if br := probeStreamBitrate(ctx, q.Headers, seg); br >= minBandwidthForEstimate {
+				q.Bandwidth = br
+			}
 		}
 	}
+	applyQualityEstimate(q)
+}
+
+func maxProbeBitrate(formatBR string, streams []struct {
+	CodecType string `json:"codec_type"`
+	Width     int    `json:"width"`
+	Height    int    `json:"height"`
+	BitRate   string `json:"bit_rate"`
+}) int {
+	best := parsePositiveInt(formatBR)
+	for _, s := range streams {
+		if br := parsePositiveInt(s.BitRate); br > best {
+			best = br
+		}
+	}
+	return best
+}
+
+func parsePositiveInt(s string) int {
+	n, err := strconv.Atoi(s)
+	if err != nil || n <= 0 {
+		return 0
+	}
+	return n
+}
+
+func firstMediaSegmentURL(playlistURL string, headers map[string]string) string {
+	body, err := fetchPlaylist(playlistURL, headers)
+	if err != nil {
+		return ""
+	}
+	base, err := url.Parse(playlistURL)
+	if err != nil {
+		return ""
+	}
+	sc := bufio.NewScanner(strings.NewReader(body))
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		ref, err := url.Parse(line)
+		if err != nil {
+			return ""
+		}
+		return base.ResolveReference(ref).String()
+	}
+	return ""
+}
+
+func probeStreamBitrate(ctx context.Context, headers map[string]string, streamURL string) int {
+	args := []string{"-v", "quiet", "-print_format", "json", "-show_format", "-show_streams"}
+	args = appendInputArgs(args, headers, streamURL)
+	out, err := ffprobeCommand(ctx, args...).Output()
+	if err != nil {
+		return 0
+	}
+	var result struct {
+		Format struct {
+			BitRate string `json:"bit_rate"`
+		} `json:"format"`
+		Streams []struct {
+			CodecType string `json:"codec_type"`
+			BitRate   string `json:"bit_rate"`
+		} `json:"streams"`
+	}
+	if err := json.Unmarshal(out, &result); err != nil {
+		return 0
+	}
+	best := parsePositiveInt(result.Format.BitRate)
+	for _, s := range result.Streams {
+		if br := parsePositiveInt(s.BitRate); br > best {
+			best = br
+		}
+	}
+	return best
+}
+
+func parseDurationLabel(label string) float64 {
+	parts := strings.Split(label, ":")
+	if len(parts) < 2 || len(parts) > 3 {
+		return 0
+	}
+	vals := make([]int, len(parts))
+	for i, p := range parts {
+		n, err := strconv.Atoi(p)
+		if err != nil {
+			return 0
+		}
+		vals[i] = n
+	}
+	if len(vals) == 2 {
+		return float64(vals[0]*60 + vals[1])
+	}
+	return float64(vals[0]*3600 + vals[1]*60 + vals[2])
+}
+
+func applyQualityEstimate(q *Quality) {
+	if q.Duration == "" || q.Bandwidth < minBandwidthForEstimate {
+		return
+	}
+	sec := parseDurationLabel(q.Duration)
+	if sec <= 0 {
+		return
+	}
+	// HLS BANDWIDTH / ffprobe bit_rate are bits/s; ~5% overhead for container.
+	q.EstimatedBytes = int64(float64(q.Bandwidth) * sec / 8 * 1.05)
 }
 
 func formatDuration(seconds float64) string {

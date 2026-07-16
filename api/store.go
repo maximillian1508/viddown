@@ -13,9 +13,10 @@ type Quality struct {
 	Label      string            `json:"label"`
 	Name       string            `json:"name,omitempty"`
 	Resolution string            `json:"resolution,omitempty"`
-	Bandwidth  int               `json:"bandwidth,omitempty"`
-	Duration   string            `json:"duration,omitempty"`
-	URL        string            `json:"url"`
+	Bandwidth       int               `json:"bandwidth,omitempty"`
+	Duration        string            `json:"duration,omitempty"`
+	EstimatedBytes  int64             `json:"estimatedBytes,omitempty"`
+	URL             string            `json:"url"`
 	Headers    map[string]string `json:"-"`
 }
 
