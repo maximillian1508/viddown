@@ -23,6 +23,8 @@ type Quality struct {
 type Video struct {
 	ID        string    `json:"id"`
 	Label     string    `json:"label"`
+	Duration  string    `json:"duration,omitempty"`
+	LikelyAd  bool      `json:"likelyAd,omitempty"`
 	MasterURL string    `json:"masterUrl,omitempty"`
 	Qualities []Quality `json:"qualities"`
 }

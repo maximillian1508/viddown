@@ -67,6 +67,7 @@ func (a *App) startProbe(pageURL string) (string, error) {
 			})
 			return
 		}
+		annotateAndSortVideos(videos)
 		if pageTitle != "" && a.cfg.LibreTranslateURL != "" && needsTranslation(cleanPageTitle(pageTitle)) {
 			a.store.UpdateProbe(id, func(j *ProbeJob) {
 				j.Message = "Translating page title…"

@@ -411,6 +411,52 @@ func formatDuration(seconds float64) string {
 	return fmt.Sprintf("%d:%02d", m, s)
 }
 
+func videoBestDurationSec(v *Video) float64 {
+	var best float64
+	for _, q := range v.Qualities {
+		if q.Duration == "" {
+			continue
+		}
+		sec := parseDurationLabel(q.Duration)
+		if sec > best {
+			best = sec
+		}
+	}
+	return best
+}
+
+// annotateAndSortVideos labels short/junk streams and sorts longest-first.
+// Streams are never removed or deselected — labels only.
+func annotateAndSortVideos(videos []Video) {
+	if len(videos) == 0 {
+		return
+	}
+	const adMaxSec = 60.0
+
+	var maxSec float64
+	for i := range videos {
+		if sec := videoBestDurationSec(&videos[i]); sec > maxSec {
+			maxSec = sec
+		}
+	}
+
+	for i := range videos {
+		sec := videoBestDurationSec(&videos[i])
+		if sec > 0 {
+			videos[i].Duration = formatDuration(sec)
+		}
+		if sec > 0 && sec < adMaxSec {
+			videos[i].LikelyAd = true
+		} else if maxSec >= 120 && sec > 0 && sec < maxSec*0.15 {
+			videos[i].LikelyAd = true
+		}
+	}
+
+	sort.SliceStable(videos, func(i, j int) bool {
+		return videoBestDurationSec(&videos[i]) > videoBestDurationSec(&videos[j])
+	})
+}
+
 func sortQualities(qs []Quality) {
 	sort.SliceStable(qs, func(i, j int) bool {
 		if qs[i].Bandwidth != qs[j].Bandwidth {

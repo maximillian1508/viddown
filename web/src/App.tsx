@@ -23,6 +23,8 @@ function formatBytes(n?: number): string {
 type Video = {
   id: string;
   label: string;
+  duration?: string;
+  likelyAd?: boolean;
   masterUrl?: string;
   qualities: Quality[];
 };
@@ -463,7 +465,17 @@ export default function App() {
                         disabled={probing}
                         onChange={(e) => toggleVideo(v, e.target.checked)}
                       />
-                      <span className="video-check-label">{v.label}</span>
+                      <span className="video-check-label">
+                        <span className="video-check-title">
+                          {v.label}
+                          {v.duration && (
+                            <span className="video-duration"> · {v.duration}</span>
+                          )}
+                        </span>
+                        {v.likelyAd && (
+                          <span className="video-badge video-badge-ad">Likely ad</span>
+                        )}
+                      </span>
                     </label>
                     <select
                       value={qid}

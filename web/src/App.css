@@ -212,11 +212,39 @@ button.primary:hover:not(:disabled) {
 }
 
 .video-check-label {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.video-check-title {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-weight: 600;
   font-size: 0.95rem;
+}
+
+.video-duration {
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.video-badge {
+  flex-shrink: 0;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.video-badge-ad {
+  color: #9a3412;
+  background: #ffedd5;
+  border: 1px solid #fdba74;
 }
 
 .video-row select {
