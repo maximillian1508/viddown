@@ -17,9 +17,12 @@ import (
 )
 
 func (a *App) startDownload(probeID, videoID, qualityID string) (string, error) {
+	if _, ok := a.store.GetProbe(probeID); !ok {
+		return "", fmt.Errorf("probe expired — re-probe the page and try again (sessions last ~30 minutes)")
+	}
 	q, videoLabel, ok := a.store.FindQuality(probeID, videoID, qualityID)
 	if !ok {
-		return "", fmt.Errorf("quality not found (probe expired or invalid ids)")
+		return "", fmt.Errorf("video or quality not found — re-probe if the stream list changed")
 	}
 
 	slug := "video"
@@ -44,6 +47,9 @@ func (a *App) startDownload(probeID, videoID, qualityID string) (string, error) 
 		Message:   "Queued…",
 		Label:     label,
 		FileName:  fileName,
+		ProbeID:   probeID,
+		VideoID:   videoID,
+		QualityID: qualityID,
 		CreatedAt: time.Now(),
 		cancel:    cancel,
 	}

@@ -20,6 +20,10 @@ func (a *App) handlePreview(w http.ResponseWriter, r *http.Request) {
 
 	q, _, ok := a.store.FindQuality(probeID, videoID, qualityID)
 	if !ok {
+		if _, probeOK := a.store.GetProbe(probeID); !probeOK {
+			writeErr(w, http.StatusNotFound, "probe expired — re-probe the page and try again (sessions last ~30 minutes)")
+			return
+		}
 		writeErr(w, http.StatusNotFound, "quality not found")
 		return
 	}

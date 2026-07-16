@@ -22,6 +22,7 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("GET /api/downloads", a.handleDownloadList)
 	mux.HandleFunc("GET /api/download/{id}", a.handleDownloadGet)
 	mux.HandleFunc("POST /api/download/{id}/cancel", a.handleDownloadCancel)
+	mux.HandleFunc("POST /api/download/{id}/retry", a.handleDownloadRetry)
 	mux.Handle("/", a.spaHandler())
 	return withCORS(mux)
 }
@@ -53,12 +54,13 @@ func (a *App) handleHealth(w http.ResponseWriter, r *http.Request) {
 	_, ffmpegErr := exec.LookPath("ffmpeg")
 	_, ffprobeErr := exec.LookPath("ffprobe")
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":           ffmpegErr == nil && ffprobeErr == nil,
-		"ffmpeg":       ffmpegErr == nil,
-		"ffprobe":      ffprobeErr == nil,
-		"output":       a.cfg.OutputDir,
-		"outputLabel":  a.cfg.OutputLabel,
-		"maxDownloads": a.cfg.MaxDownloads,
+		"ok":              ffmpegErr == nil && ffprobeErr == nil,
+		"ffmpeg":          ffmpegErr == nil,
+		"ffprobe":         ffprobeErr == nil,
+		"output":          a.cfg.OutputDir,
+		"outputLabel":     a.cfg.OutputLabel,
+		"filebrowserUrl":  a.cfg.FilebrowserURL,
+		"maxDownloads":    a.cfg.MaxDownloads,
 		"activeDownloads": a.store.ActiveDownloadCount(),
 	})
 }
@@ -118,12 +120,12 @@ func (a *App) handleDownloadGet(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "download not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, publicDownload(job, a.cfg.OutputLabel))
+	writeJSON(w, http.StatusOK, publicDownload(job, a.cfg.OutputLabel, a.cfg.FilebrowserURL))
 }
 
 func (a *App) handleDownloadList(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
-		"downloads": a.store.ListDownloads(a.cfg.OutputLabel),
+		"downloads": a.store.ListDownloads(a.cfg.OutputLabel, a.cfg.FilebrowserURL),
 	})
 }
 
@@ -135,11 +137,35 @@ func (a *App) handleDownloadCancel(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusNotFound, "download not found")
 			return
 		}
-		writeJSON(w, http.StatusOK, publicDownload(job, a.cfg.OutputLabel))
+		writeJSON(w, http.StatusOK, publicDownload(job, a.cfg.OutputLabel, a.cfg.FilebrowserURL))
 		return
 	}
 	job, _ := a.store.GetDownload(id)
-	writeJSON(w, http.StatusOK, publicDownload(job, a.cfg.OutputLabel))
+	writeJSON(w, http.StatusOK, publicDownload(job, a.cfg.OutputLabel, a.cfg.FilebrowserURL))
+}
+
+func (a *App) handleDownloadRetry(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	job, ok := a.store.GetDownload(id)
+	if !ok {
+		writeErr(w, http.StatusNotFound, "download not found")
+		return
+	}
+	if job.Status != "error" && job.Status != "cancelled" {
+		writeErr(w, http.StatusBadRequest, "only failed or cancelled downloads can be retried")
+		return
+	}
+	if job.ProbeID == "" || job.VideoID == "" || job.QualityID == "" {
+		writeErr(w, http.StatusBadRequest, "this download has no retry metadata — start a new download from the probe list")
+		return
+	}
+	newID, err := a.startDownload(job.ProbeID, job.VideoID, job.QualityID)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	a.store.RemoveDownload(id)
+	writeJSON(w, http.StatusAccepted, map[string]string{"id": newID})
 }
 
 func (a *App) spaHandler() http.Handler {

@@ -35,6 +35,10 @@ type DownloadJob = {
   progress: number;
   filePath?: string;
   fileName?: string;
+  openUrl?: string;
+  probeId?: string;
+  videoId?: string;
+  qualityId?: string;
 };
 
 /** videoId → qualityId (kept for all videos, including unchecked) */
@@ -97,6 +101,7 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [startingDownloads, setStartingDownloads] = useState(false);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const [retryingId, setRetryingId] = useState<string | null>(null);
   const [previewURL, setPreviewURL] = useState<string | null>(null);
   const [previewKind, setPreviewKind] = useState<"video" | "image" | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -361,6 +366,26 @@ export default function App() {
     }
   }
 
+  async function onRetry(id: string) {
+    setRetryingId(id);
+    setError(null);
+    try {
+      const res = await fetch(`/api/download/${id}/retry`, { method: "POST" });
+      if (!res.ok) throw new Error(await readError(res));
+      const data = await res.json();
+      setDownloadId(data.id);
+      setDownloads((prev) => prev.filter((d) => d.id !== id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Retry failed");
+    } finally {
+      setRetryingId(null);
+    }
+  }
+
+  const canRetry = (d: DownloadJob) =>
+    (d.status === "error" || d.status === "cancelled") &&
+    !!(d.probeId && d.videoId && d.qualityId);
+
   const probing = probe?.status === "running";
   const ready = probe?.status === "ready" && videos.length > 0;
   const activeDownloads = downloads.filter(isActiveDownload);
@@ -573,8 +598,32 @@ export default function App() {
                         Saved → <code>{d.fileName || d.filePath}</code>
                       </p>
                     )}
+                    {d.status === "done" && d.openUrl && (
+                      <div className="job-actions">
+                        <a
+                          className="ghost link-btn"
+                          href={d.openUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          Open in Filebrowser
+                        </a>
+                      </div>
+                    )}
                     {(d.status === "error" || d.status === "cancelled") && (
                       <p className="status">{d.message || d.status}</p>
+                    )}
+                    {canRetry(d) && (
+                      <div className="job-actions">
+                        <button
+                          type="button"
+                          className="ghost"
+                          onClick={() => onRetry(d.id)}
+                          disabled={retryingId === d.id}
+                        >
+                          {retryingId === d.id ? "Retrying…" : "Retry"}
+                        </button>
+                      </div>
                     )}
                   </div>
                 ))}

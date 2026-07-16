@@ -301,6 +301,16 @@ button.ghost:hover:not(:disabled) {
   background: color-mix(in srgb, var(--ink) 6%, transparent);
 }
 
+a.link-btn {
+  display: inline-block;
+  text-decoration: none;
+  text-align: center;
+}
+
+a.link-btn:hover {
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+}
+
 .mono {
   font-family: var(--mono);
 }

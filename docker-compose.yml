@@ -14,6 +14,8 @@ services:
       PROBE_TIMEOUT: ${PROBE_TIMEOUT:-45s}
       CHROME_PATH: ${CHROME_PATH:-/usr/bin/chromium}
       MAX_DOWNLOADS: ${MAX_DOWNLOADS:-10}
+      OUTPUT_LABEL: ${OUTPUT_LABEL:-Downloads/videos}
+      FILEBROWSER_URL: ${FILEBROWSER_URL:-}
     dns:
       - 223.5.5.5
       - 119.29.29.29

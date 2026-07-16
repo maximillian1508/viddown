@@ -16,12 +16,13 @@ var embeddedWeb embed.FS
 var webFS fs.FS
 
 type Config struct {
-	ListenAddr   string
-	OutputDir    string
-	OutputLabel  string // human path shown in UI, e.g. maxi1508/Downloads/videos
-	ProbeTimeout time.Duration
-	ChromePath   string
-	MaxDownloads int
+	ListenAddr      string
+	OutputDir       string
+	OutputLabel     string // human path shown in UI, e.g. maxi1508/Downloads/videos
+	FilebrowserURL  string // optional base URL for "open in Filebrowser" links
+	ProbeTimeout    time.Duration
+	ChromePath      string
+	MaxDownloads    int
 }
 
 func loadConfig() Config {
@@ -39,12 +40,13 @@ func loadConfig() Config {
 	}
 	listen := envOr("LISTEN_ADDR", ":8091")
 	return Config{
-		ListenAddr:   listen,
-		OutputDir:    envOr("OUTPUT_DIR", "/data/output"),
-		OutputLabel:  envOr("OUTPUT_LABEL", "Downloads/videos"),
-		ProbeTimeout: timeout,
-		ChromePath:   os.Getenv("CHROME_PATH"),
-		MaxDownloads: maxDL,
+		ListenAddr:     listen,
+		OutputDir:      envOr("OUTPUT_DIR", "/data/output"),
+		OutputLabel:    envOr("OUTPUT_LABEL", "Downloads/videos"),
+		FilebrowserURL: os.Getenv("FILEBROWSER_URL"),
+		ProbeTimeout:   timeout,
+		ChromePath:     os.Getenv("CHROME_PATH"),
+		MaxDownloads:   maxDL,
 	}
 }
 

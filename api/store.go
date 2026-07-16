@@ -44,6 +44,10 @@ type DownloadJob struct {
 	Progress  float64   `json:"progress"`
 	FilePath  string    `json:"filePath,omitempty"`
 	FileName  string    `json:"fileName,omitempty"`
+	OpenURL   string    `json:"openUrl,omitempty"`
+	ProbeID   string    `json:"probeId,omitempty"`
+	VideoID   string    `json:"videoId,omitempty"`
+	QualityID string    `json:"qualityId,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 	cancel    context.CancelFunc
 }
@@ -155,7 +159,7 @@ func (s *Store) GetDownload(id string) (*DownloadJob, bool) {
 	return &cp, true
 }
 
-func publicDownload(j *DownloadJob, outputLabel string) DownloadJob {
+func publicDownload(j *DownloadJob, outputLabel, filebrowserURL string) DownloadJob {
 	cp := *j
 	if cp.FileName != "" {
 		label := strings.Trim(outputLabel, "/")
@@ -163,17 +167,20 @@ func publicDownload(j *DownloadJob, outputLabel string) DownloadJob {
 			label = "Downloads/videos"
 		}
 		cp.FilePath = label + "/" + cp.FileName
+		if filebrowserURL != "" {
+			cp.OpenURL = strings.TrimRight(filebrowserURL, "/") + "/" + cp.FileName
+		}
 	}
 	return cp
 }
 
 // ListDownloads returns active jobs plus recent finished ones (newest first).
-func (s *Store) ListDownloads(outputLabel string) []DownloadJob {
+func (s *Store) ListDownloads(outputLabel, filebrowserURL string) []DownloadJob {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	out := make([]DownloadJob, 0, len(s.downloads))
 	for _, j := range s.downloads {
-		out = append(out, publicDownload(j, outputLabel))
+		out = append(out, publicDownload(j, outputLabel, filebrowserURL))
 	}
 	sort.Slice(out, func(i, j int) bool {
 		return out[i].CreatedAt.After(out[j].CreatedAt)
@@ -216,6 +223,12 @@ func (s *Store) CancelDownload(id string) bool {
 	default:
 		return false
 	}
+}
+
+func (s *Store) RemoveDownload(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.downloads, id)
 }
 
 func (s *Store) expireLocked() {
