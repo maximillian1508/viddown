@@ -49,20 +49,41 @@ type DownloadJob struct {
 }
 
 type Store struct {
-	mu       sync.RWMutex
-	probes   map[string]*ProbeJob
+	mu        sync.RWMutex
+	probes    map[string]*ProbeJob
 	downloads map[string]*DownloadJob
-	probeSem chan struct{}
-	dlSem    chan struct{}
+	probeSem  chan struct{}
+	dlSem     chan struct{}
+	maxDL     int
 }
 
-func NewStore() *Store {
+func NewStore(maxDownloads int) *Store {
+	if maxDownloads < 1 {
+		maxDownloads = 10
+	}
 	return &Store{
 		probes:    make(map[string]*ProbeJob),
 		downloads: make(map[string]*DownloadJob),
 		probeSem:  make(chan struct{}, 1),
-		dlSem:     make(chan struct{}, 1),
+		dlSem:     make(chan struct{}, maxDownloads),
+		maxDL:     maxDownloads,
 	}
+}
+
+func (s *Store) MaxDownloads() int {
+	return s.maxDL
+}
+
+func (s *Store) ActiveDownloadCount() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	n := 0
+	for _, j := range s.downloads {
+		if j.Status == "queued" || j.Status == "running" {
+			n++
+		}
+	}
+	return n
 }
 
 func (s *Store) PutProbe(j *ProbeJob) {

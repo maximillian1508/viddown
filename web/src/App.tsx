@@ -161,11 +161,8 @@ export default function App() {
         const active = list.some(isActiveDownload);
         if (downloadId) {
           const mine = list.find((d) => d.id === downloadId);
-          if (mine && !isActiveDownload(mine)) {
-            setBusy(false);
-            if (mine.status === "error") {
-              setError(mine.message || "Download failed");
-            }
+          if (mine && !isActiveDownload(mine) && mine.status === "error") {
+            setError(mine.message || "Download failed");
           }
         }
         // Poll fast while something is running; otherwise check rarely.
@@ -254,7 +251,6 @@ export default function App() {
   async function onDownload() {
     if (!probeId || !selectedVideo || !qualityId) return;
     setError(null);
-    setBusy(true);
     try {
       const res = await fetch("/api/download", {
         method: "POST",
@@ -269,7 +265,6 @@ export default function App() {
       const data = await res.json();
       setDownloadId(data.id);
     } catch (err) {
-      setBusy(false);
       setError(err instanceof Error ? err.message : "Download failed");
     }
   }
@@ -285,7 +280,6 @@ export default function App() {
         const rest = prev.filter((d) => d.id !== data.id);
         return [data, ...rest];
       });
-      if (downloadId === id) setBusy(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Cancel failed");
     } finally {
@@ -297,7 +291,6 @@ export default function App() {
   const ready = probe?.status === "ready" && videos.length > 0;
   const activeDownloads = downloads.filter(isActiveDownload);
   const recentDownloads = downloads.filter((d) => !isActiveDownload(d)).slice(0, 5);
-  const downloading = activeDownloads.length > 0;
 
   return (
     <div className="page">
@@ -338,7 +331,7 @@ export default function App() {
                 <select
                   value={selectedVideo?.id ?? ""}
                   onChange={(e) => setVideoId(e.target.value)}
-                  disabled={busy}
+                  disabled={probing}
                 >
                   {videos.map((v) => (
                     <option key={v.id} value={v.id}>
@@ -353,7 +346,7 @@ export default function App() {
                 <select
                   value={qualityId}
                   onChange={(e) => setQualityId(e.target.value)}
-                  disabled={busy || !selectedVideo}
+                  disabled={probing || !selectedVideo}
                 >
                   {(selectedVideo?.qualities ?? []).map((q) => (
                     <option key={q.id} value={q.id}>
@@ -367,9 +360,9 @@ export default function App() {
                 type="button"
                 className="primary"
                 onClick={onDownload}
-                disabled={busy || !qualityId}
+                disabled={probing || !qualityId}
               >
-                {downloading ? "Downloading…" : "Download"}
+                Download
               </button>
             </div>
 
@@ -412,9 +405,15 @@ export default function App() {
           <section className="jobs">
             {activeDownloads.length > 0 && (
               <>
-                <h2 className="jobs-title">Running now</h2>
+                <h2 className="jobs-title">
+                  Running now
+                  {activeDownloads.length > 0
+                    ? ` (${activeDownloads.length})`
+                    : ""}
+                </h2>
                 <p className="status">
-                  Downloads keep going on the server if you close this tab. Use Cancel to stop them.
+                  Up to 10 downloads at once. They keep going if you close this
+                  tab — use Cancel to stop them.
                 </p>
                 {activeDownloads.map((d) => (
                   <div key={d.id} className="progress-block">

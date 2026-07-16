@@ -54,7 +54,7 @@ func (a *App) startDownload(probeID, videoID, qualityID string) (string, error) 
 			cancel()
 			a.store.UpdateDownload(id, func(j *DownloadJob) {
 				j.Status = "error"
-				j.Message = "Another download is already running"
+				j.Message = fmt.Sprintf("Download limit reached (%d concurrent). Cancel one or wait.", a.store.MaxDownloads())
 			})
 			return
 		}

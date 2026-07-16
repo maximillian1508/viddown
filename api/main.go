@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 )
 
@@ -20,6 +21,7 @@ type Config struct {
 	OutputLabel  string // human path shown in UI, e.g. maxi1508/Downloads/videos
 	ProbeTimeout time.Duration
 	ChromePath   string
+	MaxDownloads int
 }
 
 func loadConfig() Config {
@@ -29,6 +31,12 @@ func loadConfig() Config {
 			timeout = d
 		}
 	}
+	maxDL := 10
+	if v := os.Getenv("MAX_DOWNLOADS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			maxDL = n
+		}
+	}
 	listen := envOr("LISTEN_ADDR", ":8091")
 	return Config{
 		ListenAddr:   listen,
@@ -36,6 +44,7 @@ func loadConfig() Config {
 		OutputLabel:  envOr("OUTPUT_LABEL", "Downloads/videos"),
 		ProbeTimeout: timeout,
 		ChromePath:   os.Getenv("CHROME_PATH"),
+		MaxDownloads: maxDL,
 	}
 }
 
@@ -58,8 +67,8 @@ func main() {
 		log.Printf("warning: output dir: %v", err)
 	}
 
-	app := &App{cfg: cfg, store: NewStore()}
-	log.Printf("viddown listening on %s (output %s)", cfg.ListenAddr, cfg.OutputDir)
+	app := &App{cfg: cfg, store: NewStore(cfg.MaxDownloads)}
+	log.Printf("viddown listening on %s (output %s, max downloads %d)", cfg.ListenAddr, cfg.OutputDir, cfg.MaxDownloads)
 	if err := http.ListenAndServe(cfg.ListenAddr, app.routes()); err != nil {
 		log.Fatal(err)
 	}

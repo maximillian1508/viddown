@@ -53,11 +53,13 @@ func (a *App) handleHealth(w http.ResponseWriter, r *http.Request) {
 	_, ffmpegErr := exec.LookPath("ffmpeg")
 	_, ffprobeErr := exec.LookPath("ffprobe")
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":          ffmpegErr == nil && ffprobeErr == nil,
-		"ffmpeg":      ffmpegErr == nil,
-		"ffprobe":     ffprobeErr == nil,
-		"output":      a.cfg.OutputDir,
-		"outputLabel": a.cfg.OutputLabel,
+		"ok":           ffmpegErr == nil && ffprobeErr == nil,
+		"ffmpeg":       ffmpegErr == nil,
+		"ffprobe":      ffprobeErr == nil,
+		"output":       a.cfg.OutputDir,
+		"outputLabel":  a.cfg.OutputLabel,
+		"maxDownloads": a.cfg.MaxDownloads,
+		"activeDownloads": a.store.ActiveDownloadCount(),
 	})
 }
 
