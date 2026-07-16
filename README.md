@@ -1,23 +1,21 @@
 # Viddown
 
-Personal page / HLS downloader on zenbook-server. Headless Chromium probe → pick video + quality → ffmpeg → Filebrowser **`maxi1508`**.
+Personal page / HLS downloader. Headless Chromium probe → pick video + quality → ffmpeg → save to a host output folder.
 
 | Item | Value |
 |------|--------|
-| URL | https://viddown.maximillianleonard.dev |
-| Local debug | http://127.0.0.1:8091 |
-| Stack | `/srv/apps/viddown/` |
+| URL | `https://viddown.example.com` (via Traefik) |
+| Local debug | `http://127.0.0.1:8091` |
+| Stack | Docker Compose in project root |
 | Image | Local build (`Dockerfile`: Vite + Go + Chromium + ffmpeg) |
-| Output | Host `…/files/users/maxi1508/Downloads/videos` → `/data/output` |
-| Tunables | `./.env` (mode `600`) — template `.env.example` |
-| Auth | None (Tailscale perimeter) |
-| Full rebuild | `~/SETUP.md` §16a |
-| Day-2 | `~/GUIDE-AND-VARIABLES.md` §5.10 + §7.1 |
+| Output | Host download folder → `/data/output` in container |
+| Tunables | `.env` (mode `600`) — template `.env.example` |
+| Auth | None (rely on network perimeter, e.g. Tailscale) |
 
 ## Start / update
 
 ```bash
-cd /srv/apps/viddown
+# from project root
 # edit .env if needed; chmod 600 .env
 docker compose up -d --build
 docker compose logs -f --tail=50
@@ -26,13 +24,11 @@ curl -sS http://127.0.0.1:8091/api/health
 
 ## Output
 
-Files land in Filebrowser → **My Files** → `Downloads/videos/`. No Filebrowser API — compose bind-mounts that folder.
+Files are written to the host folder set in `HOST_OUTPUT_DIR` (bind-mounted as `/data/output`). Point this at wherever you want finished videos to land — e.g. a Filebrowser user folder or any directory you browse regularly.
 
 ```bash
-ls -lh /srv/apps/filebrowser-quantum/files/users/maxi1508/Downloads/videos/
+ls -lh "$HOST_OUTPUT_DIR"
 ```
-
-Keep downloads here (not Immich library roots) unless you want them scanned into `gallery.`.
 
 ## API (local)
 
@@ -42,7 +38,7 @@ Keep downloads here (not Immich library roots) unless you want them scanned into
 | POST | `/api/probe` | `{ "url": "…" }` → `{ "id" }` |
 | GET | `/api/probe/:id` | status + `videos[].qualities[]` |
 | POST | `/api/download` | `{ probeId, videoId, qualityId }` |
-| GET | `/api/download/:id` | progress + Filebrowser-relative path |
+| GET | `/api/download/:id` | progress + output-relative path |
 
 One probe and one download at a time. Probe session (headers) ~30 minutes.
 
@@ -54,7 +50,7 @@ Container runs Chromium as uid `1000` with `HOME=/home/viddown` and a fresh `--u
 
 ## Traefik
 
-Router `viddown` on Docker network `proxy`. Host publish is loopback-only (`127.0.0.1:8091`).
+Router `viddown` on external Docker network `proxy`. Host publish is loopback-only (`127.0.0.1:8091`).
 
 ## Env
 
@@ -75,5 +71,5 @@ Copy `.env.example` → `.env` and set at least `HOST_OUTPUT_DIR` to your downlo
 
 ## Backup
 
-- App source + `.env`: `/srv/apps/viddown/`
-- Downloaded media: already under Filebrowser `maxi1508` (Phase 8 restic)
+- App source + `.env`: project directory on the host
+- Downloaded media: whatever path you set in `HOST_OUTPUT_DIR`
