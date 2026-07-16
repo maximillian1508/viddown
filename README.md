@@ -36,11 +36,23 @@ ls -lh "$HOST_OUTPUT_DIR"
 |--------|------|---------|
 | GET | `/api/health` | ffmpeg / output readiness |
 | POST | `/api/probe` | `{ "url": "…" }` → `{ "id" }` |
-| GET | `/api/probe/:id` | status + `videos[].qualities[]` |
+| GET | `/api/probe/:id` | status + `pageTitle` + `videos[].qualities[]` |
 | POST | `/api/download` | `{ probeId, videoId, qualityId }` |
-| GET | `/api/download/:id` | progress + output-relative path |
+| POST | `/api/download/:id/retry` | retry failed/cancelled job |
+| GET | `/api/downloads` | all jobs + `openUrl` when done |
 
-One probe and one download at a time. Probe session (headers) ~30 minutes.
+Up to `MAX_DOWNLOADS` concurrent jobs (default 10). Probe session (headers) ~30 minutes.
+
+## Page titles / LibreTranslate (optional)
+
+On page probe, Viddown reads `document.title` (fallback `h1`). Non-English titles can be translated to English filenames via optional LibreTranslate (`LT_LOAD_ONLY=zh,en`):
+
+```env
+LIBRETRANSLATE_URL=http://libretranslate:5000
+TRANSLATE_TO=en
+```
+
+Unset → URL slug only. See homelab `SETUP.md` §16b.
 
 ## Hard sites / Chromium
 

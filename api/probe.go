@@ -52,7 +52,7 @@ func (a *App) startProbe(pageURL string) (string, error) {
 			return
 		}
 
-		videos, err := a.runProbe(pageURL, id)
+		videos, pageTitle, err := a.runProbe(pageURL, id)
 		if err != nil {
 			a.store.UpdateProbe(id, func(j *ProbeJob) {
 				j.Status = "error"
@@ -67,28 +67,37 @@ func (a *App) startProbe(pageURL string) (string, error) {
 			})
 			return
 		}
+		if pageTitle != "" && a.cfg.LibreTranslateURL != "" && needsTranslation(cleanPageTitle(pageTitle)) {
+			a.store.UpdateProbe(id, func(j *ProbeJob) {
+				j.Message = "Translating page title…"
+			})
+		}
+		nameSlug, title := a.nameSlugForPage(pageURL, pageTitle)
 		a.store.UpdateProbe(id, func(j *ProbeJob) {
 			j.Status = "ready"
 			j.Message = fmt.Sprintf("Found %d video(s)", len(videos))
 			j.Videos = videos
+			j.PageTitle = title
+			j.NameSlug = nameSlug
 		})
 	}()
 
 	return id, nil
 }
 
-func (a *App) runProbe(pageURL, jobID string) ([]Video, error) {
+func (a *App) runProbe(pageURL, jobID string) ([]Video, string, error) {
 	if strings.Contains(strings.ToLower(pageURL), ".m3u8") {
 		a.store.UpdateProbe(jobID, func(j *ProbeJob) {
 			j.Message = "Parsing direct playlist…"
 		})
-		return a.buildVideosFromCaptures([]capturedStream{{
+		videos, err := a.buildVideosFromCaptures([]capturedStream{{
 			URL: pageURL,
 			Headers: map[string]string{
 				"User-Agent": defaultUA,
 				"Referer":    pageURL,
 			},
 		}})
+		return videos, "", err
 	}
 
 	a.store.UpdateProbe(jobID, func(j *ProbeJob) {
@@ -101,7 +110,7 @@ func (a *App) runProbe(pageURL, jobID string) ([]Video, error) {
 
 	userDataDir, err := os.MkdirTemp("/tmp", "chromium-user-*")
 	if err != nil {
-		return nil, fmt.Errorf("chrome profile dir: %w", err)
+		return nil, "", fmt.Errorf("chrome profile dir: %w", err)
 	}
 	defer os.RemoveAll(userDataDir)
 	crashDir := filepath.Join(userDataDir, "crash")
@@ -182,13 +191,21 @@ func (a *App) runProbe(pageURL, jobID string) ([]Video, error) {
 		chromedp.Navigate(pageURL),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("navigate: %w", err)
+		return nil, "", fmt.Errorf("navigate: %w", err)
 	}
+
+	var pageTitle string
 
 	a.store.UpdateProbe(jobID, func(j *ProbeJob) {
 		j.Message = "Waiting for page…"
 	})
 	_ = chromedp.Run(browserCtx, chromedp.Sleep(2*time.Second))
+	_ = chromedp.Run(browserCtx, chromedp.Evaluate(`(() => {
+		const t = (document.title || '').trim();
+		const h = document.querySelector('h1');
+		const h1 = h ? (h.innerText || '').trim() : '';
+		return t || h1 || '';
+	})()`, &pageTitle))
 
 	a.store.UpdateProbe(jobID, func(j *ProbeJob) {
 		j.Message = "Triggering playback…"
@@ -240,7 +257,8 @@ func (a *App) runProbe(pageURL, jobID string) ([]Video, error) {
 	a.store.UpdateProbe(jobID, func(j *ProbeJob) {
 		j.Message = "Parsing playlists…"
 	})
-	return a.buildVideosFromCaptures(list)
+	videos, err := a.buildVideosFromCaptures(list)
+	return videos, pageTitle, err
 }
 
 func (a *App) buildVideosFromCaptures(captures []capturedStream) ([]Video, error) {

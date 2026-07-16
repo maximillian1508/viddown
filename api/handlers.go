@@ -59,7 +59,9 @@ func (a *App) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"ffprobe":         ffprobeErr == nil,
 		"output":          a.cfg.OutputDir,
 		"outputLabel":     a.cfg.OutputLabel,
-		"filebrowserUrl":  a.cfg.FilebrowserURL,
+		"filebrowserUrl":     a.cfg.FilebrowserURL,
+		"libreTranslateUrl":  a.cfg.LibreTranslateURL,
+		"translateTo":        a.cfg.TranslateTo,
 		"maxDownloads":    a.cfg.MaxDownloads,
 		"activeDownloads": a.store.ActiveDownloadCount(),
 	})

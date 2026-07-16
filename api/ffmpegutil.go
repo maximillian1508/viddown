@@ -89,6 +89,18 @@ func ffprobeCommand(ctx context.Context, args ...string) *exec.Cmd {
 	return exec.CommandContext(ctx, "ffprobe", args...)
 }
 
+// appendOutputMetadata tags the output MP4 (visible in ffprobe, VLC, Filebrowser).
+func appendOutputMetadata(args []string, title, sourceURL string) []string {
+	if title != "" {
+		args = append(args, "-metadata", "title="+title)
+	}
+	if sourceURL != "" {
+		args = append(args, "-metadata", "comment=Source: "+sourceURL)
+		args = append(args, "-metadata", "description="+sourceURL)
+	}
+	return args
+}
+
 func writeHeadersFile(dir string, headers map[string]string) (string, error) {
 	arg := buildHeadersArg(headers)
 	if arg == "" {

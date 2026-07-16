@@ -31,6 +31,7 @@ type ProbeJob struct {
 	Status     string    `json:"status"`
 	Message    string    `json:"message,omitempty"`
 	PageURL    string    `json:"pageUrl,omitempty"`
+	PageTitle  string    `json:"pageTitle,omitempty"`
 	NameSlug   string    `json:"nameSlug,omitempty"`
 	Videos     []Video   `json:"videos,omitempty"`
 	CreatedAt  time.Time `json:"createdAt"`

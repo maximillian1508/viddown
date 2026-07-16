@@ -16,6 +16,11 @@ import (
 	"github.com/google/uuid"
 )
 
+type fileMeta struct {
+	Title     string
+	SourceURL string
+}
+
 func (a *App) startDownload(probeID, videoID, qualityID string) (string, error) {
 	if _, ok := a.store.GetProbe(probeID); !ok {
 		return "", fmt.Errorf("probe expired — re-probe the page and try again (sessions last ~30 minutes)")
@@ -26,8 +31,13 @@ func (a *App) startDownload(probeID, videoID, qualityID string) (string, error) 
 	}
 
 	slug := "video"
-	if probe, ok := a.store.GetProbe(probeID); ok && probe.NameSlug != "" {
-		slug = probe.NameSlug
+	var meta fileMeta
+	if probe, ok := a.store.GetProbe(probeID); ok {
+		if probe.NameSlug != "" {
+			slug = probe.NameSlug
+		}
+		meta.SourceURL = probe.PageURL
+		meta.Title = probe.PageTitle
 	}
 
 	id := uuid.NewString()
@@ -38,6 +48,9 @@ func (a *App) startDownload(probeID, videoID, qualityID string) (string, error) 
 	}
 	if q.Label != "" {
 		label = label + " · " + q.Label
+	}
+	if meta.Title == "" {
+		meta.Title = label
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -70,13 +83,13 @@ func (a *App) startDownload(probeID, videoID, qualityID string) (string, error) 
 		if job, ok := a.store.GetDownload(id); ok && job.Status == "cancelled" {
 			return
 		}
-		a.runDownload(id, q, fileName, ctx)
+		a.runDownload(id, q, fileName, meta, ctx)
 	}()
 
 	return id, nil
 }
 
-func (a *App) runDownload(jobID string, q *Quality, fileName string, ctx context.Context) {
+func (a *App) runDownload(jobID string, q *Quality, fileName string, meta fileMeta, ctx context.Context) {
 	if job, ok := a.store.GetDownload(jobID); ok && job.Status == "cancelled" {
 		return
 	}
@@ -127,6 +140,9 @@ func (a *App) runDownload(jobID string, q *Quality, fileName string, ctx context
 		"-c", "copy",
 		"-bsf:a", "aac_adtstoasc",
 		"-movflags", "+faststart",
+	)
+	args = appendOutputMetadata(args, meta.Title, meta.SourceURL)
+	args = append(args,
 		"-progress", "pipe:1",
 		"-nostats",
 		"-y",
@@ -230,7 +246,7 @@ func (a *App) runDownload(jobID string, q *Quality, fileName string, ctx context
 		}
 		msg = friendlyFFmpegError(msg)
 		if strings.Contains(msg, "aac_adtstoasc") || strings.Contains(strings.ToLower(msg), "failed to inject") {
-			a.runDownloadNoBSF(jobID, q, fileName, outPath, ctx)
+			a.runDownloadNoBSF(jobID, q, fileName, outPath, meta, ctx)
 			return
 		}
 		a.failDownload(jobID, msg)
@@ -251,7 +267,7 @@ func (a *App) runDownload(jobID string, q *Quality, fileName string, ctx context
 	})
 }
 
-func (a *App) runDownloadNoBSF(jobID string, q *Quality, fileName, outPath string, ctx context.Context) {
+func (a *App) runDownloadNoBSF(jobID string, q *Quality, fileName, outPath string, meta fileMeta, ctx context.Context) {
 	if ctx.Err() != nil {
 		a.store.UpdateDownload(jobID, func(j *DownloadJob) {
 			j.Status = "cancelled"
@@ -271,7 +287,9 @@ func (a *App) runDownloadNoBSF(jobID string, q *Quality, fileName, outPath strin
 		"-hide_banner", "-loglevel", "error",
 	}
 	args = appendInputArgs(args, q.Headers, q.URL)
-	args = append(args, "-c", "copy", "-movflags", "+faststart", "-progress", "pipe:1", "-nostats", "-y", outPath)
+	args = append(args, "-c", "copy", "-movflags", "+faststart")
+	args = appendOutputMetadata(args, meta.Title, meta.SourceURL)
+	args = append(args, "-progress", "pipe:1", "-nostats", "-y", outPath)
 
 	cmd := ffmpegCommand(ctx, args...)
 	stdout, err := cmd.StdoutPipe()

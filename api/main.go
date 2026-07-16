@@ -19,8 +19,10 @@ type Config struct {
 	ListenAddr      string
 	OutputDir       string
 	OutputLabel     string // human path shown in UI, e.g. maxi1508/Downloads/videos
-	FilebrowserURL  string // optional base URL for "open in Filebrowser" links
-	ProbeTimeout    time.Duration
+	FilebrowserURL     string // full folder URL for "open in Filebrowser" links
+	LibreTranslateURL  string
+	TranslateTo        string
+	ProbeTimeout       time.Duration
 	ChromePath      string
 	MaxDownloads    int
 }
@@ -43,7 +45,9 @@ func loadConfig() Config {
 		ListenAddr:     listen,
 		OutputDir:      envOr("OUTPUT_DIR", "/data/output"),
 		OutputLabel:    envOr("OUTPUT_LABEL", "Downloads/videos"),
-		FilebrowserURL: os.Getenv("FILEBROWSER_URL"),
+		FilebrowserURL:    os.Getenv("FILEBROWSER_URL"),
+		LibreTranslateURL: os.Getenv("LIBRETRANSLATE_URL"),
+		TranslateTo:       envOr("TRANSLATE_TO", "en"),
 		ProbeTimeout:   timeout,
 		ChromePath:     os.Getenv("CHROME_PATH"),
 		MaxDownloads:   maxDL,

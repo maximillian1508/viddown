@@ -23,6 +23,7 @@ type ProbeJob = {
   status: string;
   message?: string;
   pageUrl?: string;
+  pageTitle?: string;
   nameSlug?: string;
   videos?: Video[];
 };
@@ -77,11 +78,7 @@ function suggestedFileName(
         })()
       : q.resolution
     : "";
-  const ts = new Date()
-    .toISOString()
-    .replace(/[-:TZ.]/g, "")
-    .slice(0, 15);
-  return [base, res, videoId, ts].filter(Boolean).join("_") + ".mp4";
+  return [base, res, videoId].filter(Boolean).join("_") + ".mp4";
 }
 
 function defaultQualityId(v: Video): string {
@@ -421,6 +418,9 @@ export default function App() {
 
         {(probe?.message || probing) && (
           <p className="status">{probe?.message || "Working…"}</p>
+        )}
+        {probe?.pageTitle && probe.status === "ready" && (
+          <p className="status">Page: {probe.pageTitle}</p>
         )}
 
         {ready && (
