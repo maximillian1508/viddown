@@ -18,7 +18,7 @@ func (a *App) handlePreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	q, ok := a.store.FindQuality(probeID, videoID, qualityID)
+	q, _, ok := a.store.FindQuality(probeID, videoID, qualityID)
 	if !ok {
 		writeErr(w, http.StatusNotFound, "quality not found")
 		return

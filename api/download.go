@@ -17,7 +17,7 @@ import (
 )
 
 func (a *App) startDownload(probeID, videoID, qualityID string) (string, error) {
-	q, ok := a.store.FindQuality(probeID, videoID, qualityID)
+	q, videoLabel, ok := a.store.FindQuality(probeID, videoID, qualityID)
 	if !ok {
 		return "", fmt.Errorf("quality not found (probe expired or invalid ids)")
 	}
@@ -27,14 +27,17 @@ func (a *App) startDownload(probeID, videoID, qualityID string) (string, error) 
 		slug = probe.NameSlug
 	}
 
-	fileName := buildDownloadFileName(slug, q.Resolution)
+	id := uuid.NewString()
+	fileName := buildDownloadFileName(slug, q.Resolution, videoID, id[:8])
 	label := slug
+	if videoLabel != "" {
+		label = videoLabel
+	}
 	if q.Label != "" {
-		label = slug + " · " + q.Label
+		label = label + " · " + q.Label
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	id := uuid.NewString()
 	job := &DownloadJob{
 		ID:        id,
 		Status:    "queued",

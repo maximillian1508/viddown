@@ -321,24 +321,23 @@ func (a *App) buildVideosFromCaptures(captures []capturedStream) ([]Video, error
 		}
 	}
 
-	if len(orphans) > 0 {
+	// Each orphan media playlist is its own video (not quality variants).
+	// Sites often expose many discrete .m3u8s (main + ads); bundling them as
+	// "9 streams" under one quality dropdown made multiselect useless.
+	for i, c := range orphans {
 		vidIdx++
+		label := labelFromURL(c.URL)
+		if len(orphans) > 1 {
+			label = fmt.Sprintf("Stream %d · %s", i+1, label)
+		}
 		v := Video{
 			ID:    fmt.Sprintf("v%d", vidIdx),
-			Label: "Other streams",
-		}
-		for i, c := range orphans {
-			v.Qualities = append(v.Qualities, Quality{
-				ID:      fmt.Sprintf("q%d", i+1),
+			Label: label,
+			Qualities: []Quality{{
+				ID:      "q1",
 				URL:     c.URL,
 				Headers: cloneHeaders(c.Headers),
-			})
-			_ = i
-		}
-		if len(masters) == 0 && len(orphans) == 1 {
-			v.Label = labelFromURL(orphans[0].URL)
-		} else if len(masters) == 0 {
-			v.Label = fmt.Sprintf("%d streams", len(orphans))
+			}},
 		}
 		v.Qualities = finalizeQualities(v.Qualities)
 		videos = append(videos, v)

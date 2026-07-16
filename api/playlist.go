@@ -397,12 +397,18 @@ func sanitizeSlug(s string) string {
 	return out
 }
 
-func buildDownloadFileName(slug, resolution string) string {
+func buildDownloadFileName(slug, resolution, videoID, uniq string) string {
 	ts := time.Now().Format("20060102_150405")
 	parts := []string{slug}
 	if resolution != "" {
 		parts = append(parts, prettyResolution(resolution))
 	}
+	if videoID != "" {
+		parts = append(parts, videoID)
+	}
 	parts = append(parts, ts)
+	if uniq != "" {
+		parts = append(parts, uniq)
+	}
 	return strings.Join(parts, "_") + ".mp4"
 }

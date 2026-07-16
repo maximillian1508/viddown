@@ -37,6 +37,9 @@ type DownloadJob = {
   fileName?: string;
 };
 
+/** videoId → qualityId (kept for all videos, including unchecked) */
+type QualityMap = Record<string, string>;
+
 function isActiveDownload(d: DownloadJob): boolean {
   return d.status === "queued" || d.status === "running";
 }
@@ -50,7 +53,11 @@ async function readError(res: Response): Promise<string> {
   }
 }
 
-function suggestedFileName(slug: string | undefined, q: Quality | undefined): string {
+function suggestedFileName(
+  slug: string | undefined,
+  q: Quality | undefined,
+  videoId?: string,
+): string {
   const base = slug || "video";
   const res = q?.resolution
     ? q.resolution.includes("x")
@@ -70,19 +77,25 @@ function suggestedFileName(slug: string | undefined, q: Quality | undefined): st
     .toISOString()
     .replace(/[-:TZ.]/g, "")
     .slice(0, 15);
-  return [base, res, ts].filter(Boolean).join("_") + ".mp4";
+  return [base, res, videoId, ts].filter(Boolean).join("_") + ".mp4";
+}
+
+function defaultQualityId(v: Video): string {
+  return v.qualities[0]?.id ?? "";
 }
 
 export default function App() {
   const [url, setUrl] = useState("");
   const [probeId, setProbeId] = useState<string | null>(null);
   const [probe, setProbe] = useState<ProbeJob | null>(null);
-  const [videoId, setVideoId] = useState("");
-  const [qualityId, setQualityId] = useState("");
+  const [qualityByVideo, setQualityByVideo] = useState<QualityMap>({});
+  const [checkedIds, setCheckedIds] = useState<Record<string, boolean>>({});
+  const [focusVideoId, setFocusVideoId] = useState("");
   const [downloadId, setDownloadId] = useState<string | null>(null);
   const [downloads, setDownloads] = useState<DownloadJob[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [startingDownloads, setStartingDownloads] = useState(false);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
   const [previewURL, setPreviewURL] = useState<string | null>(null);
   const [previewKind, setPreviewKind] = useState<"video" | "image" | null>(null);
@@ -90,27 +103,37 @@ export default function App() {
   const [previewError, setPreviewError] = useState<string | null>(null);
 
   const videos = probe?.videos ?? [];
-  const selectedVideo = useMemo(
-    () => videos.find((v) => v.id === videoId) ?? videos[0],
-    [videos, videoId],
+  const selectedIds = useMemo(
+    () => videos.map((v) => v.id).filter((id) => checkedIds[id]),
+    [videos, checkedIds],
   );
-  const selectedQuality = useMemo(
-    () => selectedVideo?.qualities.find((q) => q.id === qualityId),
-    [selectedVideo, qualityId],
-  );
+  const selectedCount = selectedIds.length;
 
+  const focusVideo = useMemo(() => {
+    if (!focusVideoId) return videos[0] ?? null;
+    return videos.find((v) => v.id === focusVideoId) ?? videos[0] ?? null;
+  }, [videos, focusVideoId]);
+
+  const focusQuality = useMemo(() => {
+    if (!focusVideo) return undefined;
+    const qid = qualityByVideo[focusVideo.id] ?? defaultQualityId(focusVideo);
+    return focusVideo.qualities.find((q) => q.id === qid);
+  }, [focusVideo, qualityByVideo]);
+
+  // When probe results arrive, select all videos (best quality = first).
   useEffect(() => {
-    if (!selectedVideo) {
-      setVideoId("");
-      setQualityId("");
-      return;
+    if (probe?.status !== "ready" || videos.length === 0) return;
+    const nextQ: QualityMap = {};
+    const nextChecked: Record<string, boolean> = {};
+    for (const v of videos) {
+      const qid = defaultQualityId(v);
+      if (qid) nextQ[v.id] = qid;
+      nextChecked[v.id] = true;
     }
-    setVideoId(selectedVideo.id);
-    const firstQ = selectedVideo.qualities[0]?.id ?? "";
-    setQualityId((prev) =>
-      selectedVideo.qualities.some((q) => q.id === prev) ? prev : firstQ,
-    );
-  }, [selectedVideo]);
+    setQualityByVideo(nextQ);
+    setCheckedIds(nextChecked);
+    setFocusVideoId(videos[0]?.id ?? "");
+  }, [probe?.status, probe?.id]); // eslint-disable-line react-hooks/exhaustive-deps -- init once per probe
 
   useEffect(() => {
     if (!probeId) return;
@@ -165,7 +188,6 @@ export default function App() {
             setError(mine.message || "Download failed");
           }
         }
-        // Poll fast while something is running; otherwise check rarely.
         schedule(active || downloadId ? 1500 : 12000);
       } catch {
         if (!cancelled) schedule(5000);
@@ -180,10 +202,13 @@ export default function App() {
   }, [downloadId]);
 
   const probeReady = probe?.status === "ready";
-  const previewVideoId = selectedVideo?.id ?? "";
+  const previewVideoId = focusVideo?.id ?? "";
+  const previewQualityId = focusVideo
+    ? qualityByVideo[focusVideo.id] ?? defaultQualityId(focusVideo)
+    : "";
 
   useEffect(() => {
-    if (!probeId || !previewVideoId || !qualityId || !probeReady) {
+    if (!probeId || !previewVideoId || !previewQualityId || !probeReady) {
       setPreviewURL(null);
       setPreviewKind(null);
       setPreviewError(null);
@@ -199,7 +224,7 @@ export default function App() {
     const qs = new URLSearchParams({
       probeId,
       videoId: previewVideoId,
-      qualityId,
+      qualityId: previewQualityId,
     });
 
     fetch(`/api/preview?${qs}`)
@@ -224,13 +249,37 @@ export default function App() {
       cancelled = true;
       if (objectURL) URL.revokeObjectURL(objectURL);
     };
-  }, [probeId, previewVideoId, qualityId, probeReady]);
+  }, [probeId, previewVideoId, previewQualityId, probeReady]);
+
+  function toggleVideo(v: Video, checked: boolean) {
+    setCheckedIds((prev) => ({ ...prev, [v.id]: checked }));
+    if (checked) setFocusVideoId(v.id);
+  }
+
+  function setVideoQuality(videoId: string, qualityId: string) {
+    setQualityByVideo((prev) => ({ ...prev, [videoId]: qualityId }));
+    setFocusVideoId(videoId);
+  }
+
+  function selectAll() {
+    const next: Record<string, boolean> = {};
+    for (const v of videos) next[v.id] = true;
+    setCheckedIds(next);
+    if (videos[0]) setFocusVideoId(videos[0].id);
+  }
+
+  function selectNone() {
+    setCheckedIds({});
+  }
 
   async function onProbe(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     setDownloadId(null);
     setProbe(null);
+    setQualityByVideo({});
+    setCheckedIds({});
+    setFocusVideoId("");
     setPreviewURL(null);
     setBusy(true);
     try {
@@ -248,24 +297,49 @@ export default function App() {
     }
   }
 
-  async function onDownload() {
-    if (!probeId || !selectedVideo || !qualityId) return;
+  async function onDownloadSelected() {
+    if (!probeId || selectedCount === 0) return;
     setError(null);
+    setStartingDownloads(true);
+    const entries = selectedIds.map((videoId) => {
+      const v = videos.find((x) => x.id === videoId);
+      return {
+        videoId,
+        qualityId: qualityByVideo[videoId] || (v ? defaultQualityId(v) : ""),
+      };
+    });
+    const errors: string[] = [];
+    let lastId: string | null = null;
     try {
-      const res = await fetch("/api/download", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          probeId,
-          videoId: selectedVideo.id,
-          qualityId,
-        }),
-      });
-      if (!res.ok) throw new Error(await readError(res));
-      const data = await res.json();
-      setDownloadId(data.id);
+      for (const { videoId, qualityId } of entries) {
+        if (!qualityId) {
+          errors.push(`${videoId}: no quality`);
+          continue;
+        }
+        const res = await fetch("/api/download", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ probeId, videoId, qualityId }),
+        });
+        if (!res.ok) {
+          errors.push(`${videoId}: ${await readError(res)}`);
+          continue;
+        }
+        const data = await res.json();
+        lastId = data.id;
+      }
+      if (lastId) setDownloadId(lastId);
+      if (errors.length) {
+        setError(
+          errors.length === entries.length
+            ? errors.join("; ")
+            : `Started ${entries.length - errors.length}; failed: ${errors.join("; ")}`,
+        );
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Download failed");
+    } finally {
+      setStartingDownloads(false);
     }
   }
 
@@ -298,7 +372,8 @@ export default function App() {
         <p className="brand">Viddown</p>
         <h1>Pull a stream into Filebrowser</h1>
         <p className="lede">
-          Paste a page or m3u8 URL. Pick the video and quality, then download.
+          Paste a page or m3u8 URL. Select one or more videos, pick quality, then
+          download.
         </p>
       </header>
 
@@ -325,79 +400,120 @@ export default function App() {
 
         {ready && (
           <>
-            <div className="selectors">
-              <label className="field">
-                <span>Video</span>
-                <select
-                  value={selectedVideo?.id ?? ""}
-                  onChange={(e) => setVideoId(e.target.value)}
-                  disabled={probing}
-                >
-                  {videos.map((v) => (
-                    <option key={v.id} value={v.id}>
-                      {v.label} ({v.qualities.length})
-                    </option>
-                  ))}
-                </select>
-              </label>
+            <div className="video-list-header">
+              <span className="field-label">Videos</span>
+              <div className="video-list-actions">
+                <button type="button" className="ghost" onClick={selectAll} disabled={probing}>
+                  Select all
+                </button>
+                <button type="button" className="ghost" onClick={selectNone} disabled={probing}>
+                  None
+                </button>
+              </div>
+            </div>
 
-              <label className="field">
-                <span>Quality</span>
-                <select
-                  value={qualityId}
-                  onChange={(e) => setQualityId(e.target.value)}
-                  disabled={probing || !selectedVideo}
-                >
-                  {(selectedVideo?.qualities ?? []).map((q) => (
-                    <option key={q.id} value={q.id}>
-                      {q.label || "Stream"}
-                    </option>
-                  ))}
-                </select>
-              </label>
+            <ul className="video-list">
+              {videos.map((v) => {
+                const checked = !!checkedIds[v.id];
+                const qid = qualityByVideo[v.id] ?? defaultQualityId(v);
+                const focused = focusVideo?.id === v.id;
+                return (
+                  <li
+                    key={v.id}
+                    className={`video-row${checked ? " is-checked" : ""}${focused ? " is-focus" : ""}`}
+                  >
+                    <label className="video-check">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        disabled={probing}
+                        onChange={(e) => toggleVideo(v, e.target.checked)}
+                      />
+                      <span className="video-check-label">{v.label}</span>
+                    </label>
+                    <select
+                      value={qid}
+                      disabled={probing}
+                      onChange={(e) => setVideoQuality(v.id, e.target.value)}
+                      onClick={() => setFocusVideoId(v.id)}
+                      aria-label={`Quality for ${v.label}`}
+                    >
+                      {v.qualities.map((q) => (
+                        <option key={q.id} value={q.id}>
+                          {q.label || "Stream"}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      className="ghost preview-pick"
+                      disabled={probing}
+                      onClick={() => setFocusVideoId(v.id)}
+                    >
+                      Preview
+                    </button>
 
+                    {focused && (
+                      <div className="preview-row preview-row-inline">
+                        <div className="preview-frame">
+                          {previewLoading && <p className="status">Loading preview…</p>}
+                          {!previewLoading && previewURL && previewKind === "video" && (
+                            <video
+                              src={previewURL}
+                              muted
+                              autoPlay
+                              loop
+                              playsInline
+                              controls={false}
+                            />
+                          )}
+                          {!previewLoading && previewURL && previewKind === "image" && (
+                            <img src={previewURL} alt="Stream preview" />
+                          )}
+                          {!previewLoading && !previewURL && (
+                            <p className="status">
+                              {previewError ? "Preview unavailable" : "No preview"}
+                            </p>
+                          )}
+                        </div>
+                        <div className="preview-meta">
+                          <p className="meta-label">Preview · {v.label}</p>
+                          {focusQuality && (
+                            <code className="filename">
+                              {suggestedFileName(probe?.nameSlug, focusQuality, v.id)}
+                            </code>
+                          )}
+                          {focusQuality?.duration && (
+                            <p className="status">Duration ~ {focusQuality.duration}</p>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+
+            <div className="download-bar">
+              <p className="status">
+                {selectedCount === 0
+                  ? "Select at least one video"
+                  : `${selectedCount} selected`}
+              </p>
               <button
                 type="button"
                 className="primary"
-                onClick={onDownload}
-                disabled={probing || !qualityId}
+                onClick={onDownloadSelected}
+                disabled={probing || startingDownloads || selectedCount === 0}
               >
-                Download
+                {startingDownloads
+                  ? "Starting…"
+                  : selectedCount <= 1
+                    ? "Download"
+                    : `Download ${selectedCount}`}
               </button>
             </div>
 
-            <div className="preview-row">
-              <div className="preview-frame">
-                {previewLoading && <p className="status">Loading preview…</p>}
-                {!previewLoading && previewURL && previewKind === "video" && (
-                  <video
-                    src={previewURL}
-                    muted
-                    autoPlay
-                    loop
-                    playsInline
-                    controls={false}
-                  />
-                )}
-                {!previewLoading && previewURL && previewKind === "image" && (
-                  <img src={previewURL} alt="Stream preview" />
-                )}
-                {!previewLoading && !previewURL && (
-                  <p className="status">
-                    {previewError ? "Preview unavailable" : "No preview"}
-                  </p>
-                )}
-              </div>
-              <div className="preview-meta">
-                <p className="meta-label">Will save as</p>
-                <code className="filename">
-                  {suggestedFileName(probe?.nameSlug, selectedQuality)}
-                </code>
-                {selectedQuality?.duration && (
-                  <p className="status">Duration ~ {selectedQuality.duration}</p>
-                )}
-              </div>
-            </div>
           </>
         )}
 

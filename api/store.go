@@ -116,12 +116,12 @@ func (s *Store) UpdateProbe(id string, fn func(*ProbeJob)) {
 	}
 }
 
-func (s *Store) FindQuality(probeID, videoID, qualityID string) (*Quality, bool) {
+func (s *Store) FindQuality(probeID, videoID, qualityID string) (*Quality, string, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	j, ok := s.probes[probeID]
 	if !ok {
-		return nil, false
+		return nil, "", false
 	}
 	for _, v := range j.Videos {
 		if v.ID != videoID {
@@ -130,11 +130,11 @@ func (s *Store) FindQuality(probeID, videoID, qualityID string) (*Quality, bool)
 		for i := range v.Qualities {
 			if v.Qualities[i].ID == qualityID {
 				q := v.Qualities[i]
-				return &q, true
+				return &q, v.Label, true
 			}
 		}
 	}
-	return nil, false
+	return nil, "", false
 }
 
 func (s *Store) PutDownload(j *DownloadJob) {
