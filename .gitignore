@@ -1,26 +1,26 @@
-  # secrets / local env
-  .env
-  .env.*
-  !.env.example
-  # deps & build
-  **/node_modules/
-  web/dist/
-  api/web/
-  # go
-  api/vendor/
-  *.exe
-  *.test
-  # editor / OS
-  .DS_Store
-  .idea/
-  .vscode/
-  *.swp
-  *~
-  # logs / temp
-  *.log
-  # old Wails / local CLI leftovers (if mixed into this folder)
-  hls-download
-  downloads/
-  build/bin/
-  frontend/dist/
-  frontend/node_modules/
+# secrets / local env
+.env
+.env.*
+!.env.example
+# deps & build
+**/node_modules/
+web/dist/
+api/web/
+# go
+api/vendor/
+*.exe
+*.test
+# editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
+# logs / temp
+*.log
+# old Wails / local CLI leftovers (if mixed into this folder)
+hls-download
+downloads/
+build/bin/
+frontend/dist/
+frontend/node_modules/
