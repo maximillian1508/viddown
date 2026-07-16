@@ -1,0 +1,42 @@
+services:
+  viddown:
+    build: .
+    container_name: ${CONTAINER_NAME:-viddown}
+    restart: unless-stopped
+    init: true
+    user: "${PUID:-1000}:${PGID:-1000}"
+    env_file:
+      - .env
+    environment:
+      TZ: ${TZ:-Asia/Kuala_Lumpur}
+      OUTPUT_DIR: ${OUTPUT_DIR:-/data/output}
+      LISTEN_ADDR: ${LISTEN_ADDR:-:8091}
+      PROBE_TIMEOUT: ${PROBE_TIMEOUT:-45s}
+      CHROME_PATH: ${CHROME_PATH:-/usr/bin/chromium}
+    dns:
+      - 223.5.5.5
+      - 119.29.29.29
+      - 9.9.9.9
+    volumes:
+      # Host folder ←→ container path the Go app writes to (OUTPUT_DIR)
+      - ${HOST_OUTPUT_DIR}:${OUTPUT_DIR:-/data/output}
+    ports:
+      - "${HOST_IP:-127.0.0.1}:${HOST_PORT:-8091}:${CONTAINER_PORT:-8091}"
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.viddown.rule=Host(`${TRAEFIK_HOST}`)
+      - traefik.http.routers.viddown.entrypoints=${TRAEFIK_ENTRYPOINT:-websecure}
+      - traefik.http.routers.viddown.tls.certresolver=${TRAEFIK_CERTRESOLVER:-cf}
+      - traefik.http.services.viddown.loadbalancer.server.port=${CONTAINER_PORT:-8091}
+    networks:
+      - default
+      - proxy
+    deploy:
+      resources:
+        limits:
+          memory: ${MEMORY_LIMIT:-1536M}
+
+networks:
+  proxy:
+    external: true
+    name: ${TRAEFIK_NETWORK:-proxy}
