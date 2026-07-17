@@ -130,13 +130,51 @@
 }
 
 .probe-row {
-  flex-direction: column;
-  align-items: stretch;
+  min-width: 0;
 }
 
-.probe-row > button {
+.probe-url-block {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.probe-url-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  line-height: 1.2;
+}
+
+.probe-url-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.probe-url-main > button[type="submit"] {
   width: 100%;
   min-height: 44px;
+}
+
+@media (min-width: 640px) {
+  .probe-url-main {
+    flex-direction: row;
+    align-items: flex-end;
+  }
+
+  .probe-url-main .url-input-row {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .probe-url-main > button[type="submit"] {
+    width: auto;
+    flex: 0 0 auto;
+  }
 }
 
 @media (min-width: 640px) {
@@ -153,18 +191,6 @@
 .grow {
   flex: 1 1 240px;
   min-width: 0;
-}
-
-.probe-row .field.grow {
-  flex: 0 0 auto;
-  width: 100%;
-}
-
-@media (min-width: 640px) {
-  .probe-row .field.grow {
-    flex: 1 1 240px;
-    width: auto;
-  }
 }
 
 .field {
@@ -585,9 +611,70 @@ button.primary:hover:not(:disabled) {
 .jobs {
   display: grid;
   gap: 0.85rem;
-  padding-top: 0.35rem;
-  border-top: 1px solid color-mix(in srgb, var(--ink) 10%, transparent);
   min-width: 0;
+}
+
+.history-panel {
+  margin-top: 0.85rem;
+}
+
+.history-panel .jobs {
+  padding-top: 0;
+  border-top: none;
+}
+
+.history-lede {
+  margin: -0.25rem 0 0.35rem;
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+.history-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding-top: 0.25rem;
+}
+
+.history-page-meta {
+  margin: 0;
+  text-align: center;
+  flex: 1;
+  min-width: 8rem;
+}
+
+.job-status.status-error {
+  color: var(--danger, #b42318);
+}
+
+.job-status.status-cancelled {
+  color: var(--muted);
+}
+
+.job-status.status-done {
+  color: var(--accent-ink);
+}
+
+.history-empty {
+  margin: 0;
+}
+
+.job-time {
+  margin: -0.35rem 0 0.15rem;
+  font-size: 0.82rem;
+}
+
+.job-status {
+  text-transform: capitalize;
+  flex-shrink: 0;
+}
+
+@media (min-width: 640px) {
+  .history-panel {
+    margin-top: 1rem;
+  }
 }
 
 .jobs-title {

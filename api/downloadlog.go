@@ -1,14 +1,9 @@
 package main
 
 import (
-	"encoding/json"
-	"fmt"
 	"net/url"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -24,122 +19,7 @@ type DownloadRecord struct {
 	SavedAt   time.Time `json:"savedAt"`
 }
 
-type DownloadLog struct {
-	path string
-	mu   sync.Mutex
-}
-
-func NewDownloadLog(dataDir string) *DownloadLog {
-	return &DownloadLog{path: filepath.Join(dataDir, downloadLogName)}
-}
-
-func (l *DownloadLog) load() ([]DownloadRecord, error) {
-	data, err := os.ReadFile(l.path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	var records []DownloadRecord
-	if err := json.Unmarshal(data, &records); err != nil {
-		return nil, fmt.Errorf("parse download log: %w", err)
-	}
-	return records, nil
-}
-
-func (l *DownloadLog) save(records []DownloadRecord) error {
-	data, err := json.MarshalIndent(records, "", "  ")
-	if err != nil {
-		return err
-	}
-	dir := filepath.Dir(l.path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(dir, ".viddown-downloads-*.tmp")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
-
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmpPath, l.path)
-}
-
-// Upsert replaces an existing entry with the same pageUrl+videoId+quality (or slug fallback).
-func (l *DownloadLog) Upsert(rec DownloadRecord) error {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	records, err := l.load()
-	if err != nil {
-		return err
-	}
-
-	urlKey := urlRecordKey(rec.PageURL, rec.VideoID, rec.Quality)
-	slugKey := slugRecordKey(rec.Slug, rec.VideoID, rec.Quality)
-	skKey := streamRecordKey(rec.PageURL, rec.Quality, rec.StreamKey)
-	replaced := false
-	if skKey != "" {
-		for i := range records {
-			if streamRecordKey(records[i].PageURL, records[i].Quality, records[i].StreamKey) == skKey {
-				records[i] = rec
-				replaced = true
-				break
-			}
-		}
-	}
-	if !replaced {
-		for i := range records {
-			if urlKey != "" && urlRecordKey(records[i].PageURL, records[i].VideoID, records[i].Quality) == urlKey {
-				records[i] = rec
-				replaced = true
-				break
-			}
-		}
-	}
-	if !replaced && urlKey != "" {
-		for i := range records {
-			if records[i].PageURL == "" && slugRecordKey(records[i].Slug, records[i].VideoID, records[i].Quality) == slugKey {
-				records[i] = rec
-				replaced = true
-				break
-			}
-		}
-	}
-	if !replaced && urlKey == "" {
-		for i := range records {
-			if slugRecordKey(records[i].Slug, records[i].VideoID, records[i].Quality) == slugKey {
-				records[i] = rec
-				replaced = true
-				break
-			}
-		}
-	}
-	if !replaced {
-		records = append(records, rec)
-	}
-	return l.save(records)
-}
-
-// Find returns the best log record for a stream (page URL + stream identity + quality).
-func (l *DownloadLog) Find(pageURL, slug, videoID, quality, streamK string) (*DownloadRecord, error) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	records, err := l.load()
-	if err != nil {
-		return nil, err
-	}
-
+func findDownloadRecord(records []DownloadRecord, pageURL, slug, videoID, quality, streamK string) *DownloadRecord {
 	skKey := streamRecordKey(pageURL, quality, streamK)
 	urlKey := urlRecordKey(pageURL, videoID, quality)
 	slugKey := slugRecordKey(slug, videoID, quality)
@@ -160,7 +40,7 @@ func (l *DownloadLog) Find(pageURL, slug, videoID, quality, streamK string) (*Do
 		}
 	}
 	if best != nil {
-		return best, nil
+		return best
 	}
 
 	if urlKey != "" {
@@ -172,7 +52,7 @@ func (l *DownloadLog) Find(pageURL, slug, videoID, quality, streamK string) (*Do
 		}
 	}
 	if best != nil {
-		return best, nil
+		return best
 	}
 
 	if slug != "" {
@@ -184,10 +64,9 @@ func (l *DownloadLog) Find(pageURL, slug, videoID, quality, streamK string) (*Do
 		}
 	}
 	if best != nil {
-		return best, nil
+		return best
 	}
 
-	// One saved file for this page+quality → label any matching stream (legacy logs without streamKey).
 	if normalizePageURL(pageURL) != "" && quality != "" {
 		var sole *DownloadRecord
 		for i := range records {
@@ -204,10 +83,22 @@ func (l *DownloadLog) Find(pageURL, slug, videoID, quality, streamK string) (*Do
 			sole = &records[i]
 		}
 		if sole != nil {
-			return sole, nil
+			return sole
 		}
 	}
 
+	return nil
+}
+
+func (db *Database) FindDownload(pageURL, slug, videoID, quality, streamK string) (*DownloadRecord, error) {
+	records, err := db.loadAllDownloads()
+	if err != nil {
+		return nil, err
+	}
+	if rec := findDownloadRecord(records, pageURL, slug, videoID, quality, streamK); rec != nil {
+		cp := *rec
+		return &cp, nil
+	}
 	return nil, nil
 }
 
@@ -250,7 +141,6 @@ func streamRecordKey(pageURL, quality, streamK string) string {
 	return ""
 }
 
-// streamKey normalizes an HLS URL so the same stream matches across probes (ignores auth_key etc.).
 func streamKey(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -283,7 +173,6 @@ var (
 	reTimeOfDay = regexp.MustCompile(`^\d{6}$`)
 )
 
-// parseDownloadFileName extracts slug, videoId, and quality from a viddown-style filename.
 func parseDownloadFileName(name string) (slug, videoID, quality string, ok bool) {
 	lower := strings.ToLower(name)
 	if !strings.HasSuffix(lower, ".mp4") {
@@ -329,114 +218,15 @@ func parseDownloadFileName(name string) (slug, videoID, quality string, ok bool)
 	return slug, videoID, quality, true
 }
 
-// SeedFromOutputDir imports existing *.mp4 filenames into the log (one-time / testing).
-func (l *DownloadLog) SeedFromOutputDir(outputDir string) (int, error) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	matches, err := filepath.Glob(filepath.Join(outputDir, "*.mp4"))
-	if err != nil {
-		return 0, err
-	}
-
-	records, err := l.load()
-	if err != nil {
-		return 0, err
-	}
-	byKey := make(map[string]DownloadRecord, len(records))
-	for _, rec := range records {
-		key := urlRecordKey(rec.PageURL, rec.VideoID, rec.Quality)
-		if key == "" {
-			key = "slug:" + slugRecordKey(rec.Slug, rec.VideoID, rec.Quality)
-		}
-		byKey[key] = rec
-	}
-
-	added := 0
-	for _, path := range matches {
-		name := filepath.Base(path)
-		slug, videoID, quality, ok := parseDownloadFileName(name)
-		if !ok {
-			continue
-		}
-		fi, err := os.Stat(path)
-		if err != nil {
-			continue
-		}
-		key := "slug:" + slugRecordKey(slug, videoID, quality)
-		rec := DownloadRecord{
-			Slug:     slug,
-			VideoID:  videoID,
-			Quality:  quality,
-			FileName: name,
-			SavedAt:  fi.ModTime(),
-		}
-		prev, exists := byKey[key]
-		if exists && !rec.SavedAt.After(prev.SavedAt) {
-			continue
-		}
-		if !exists {
-			added++
-		}
-		byKey[key] = rec
-	}
-
-	if len(byKey) == 0 {
-		return 0, nil
-	}
-	out := make([]DownloadRecord, 0, len(byKey))
-	for _, rec := range byKey {
-		out = append(out, rec)
-	}
-	if err := l.save(out); err != nil {
-		return 0, err
-	}
-	return added, nil
-}
-
-func (l *DownloadLog) isEmpty() bool {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	records, err := l.load()
-	return err != nil || len(records) == 0
-}
-
-// migrateFromLegacy imports records from the old output-dir log if the new log is empty.
-func (l *DownloadLog) migrateFromLegacy(legacyPath string) (int, error) {
-	if !l.isEmpty() {
-		return 0, nil
-	}
-	data, err := os.ReadFile(legacyPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return 0, nil
-		}
-		return 0, err
-	}
-	var records []DownloadRecord
-	if err := json.Unmarshal(data, &records); err != nil {
-		return 0, fmt.Errorf("parse legacy download log: %w", err)
-	}
-	if len(records) == 0 {
-		return 0, nil
-	}
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if err := l.save(records); err != nil {
-		return 0, err
-	}
-	return len(records), nil
-}
-
 func (a *App) annotateExistingFromLog(videos []Video, pageURL, slug string) {
-	if a.dlLog == nil || (pageURL == "" && slug == "") {
+	if a.db == nil || (pageURL == "" && slug == "") {
 		return
 	}
 	for i := range videos {
 		for j := range videos[i].Qualities {
 			q := &videos[i].Qualities[j]
 			quality := prettyResolution(q.Resolution)
-			rec, err := a.dlLog.Find(pageURL, slug, videos[i].ID, quality, streamKey(q.URL))
+			rec, err := a.db.FindDownload(pageURL, slug, videos[i].ID, quality, streamKey(q.URL))
 			if err != nil || rec == nil {
 				continue
 			}
@@ -448,6 +238,14 @@ func (a *App) annotateExistingFromLog(videos []Video, pageURL, slug string) {
 
 func (a *App) probeJobForAPI(id string) (*ProbeJob, bool) {
 	job, ok := a.store.GetProbe(id)
+	if !ok && a.db != nil {
+		loaded, err := a.db.GetProbe(id)
+		if err != nil || loaded == nil {
+			return nil, false
+		}
+		a.store.PutProbe(loaded, false)
+		job, ok = loaded, true
+	}
 	if !ok {
 		return nil, false
 	}
@@ -471,11 +269,18 @@ func cloneVideosForAnnotate(src []Video) []Video {
 }
 
 func (a *App) recordDownload(jobID string) {
-	if a.dlLog == nil {
+	if a.db == nil {
 		return
 	}
 	job, ok := a.store.GetDownload(jobID)
-	if !ok || job.FileName == "" {
+	if !ok {
+		loaded, err := a.db.GetDownloadJob(jobID)
+		if err != nil || loaded == nil {
+			return
+		}
+		job = loaded
+	}
+	if job.FileName == "" {
 		return
 	}
 
@@ -486,6 +291,13 @@ func (a *App) recordDownload(jobID string) {
 			slug = probe.NameSlug
 		}
 		pageURL = probe.PageURL
+	} else if a.db != nil {
+		if probe, err := a.db.GetProbe(job.ProbeID); err == nil && probe != nil {
+			if probe.NameSlug != "" {
+				slug = probe.NameSlug
+			}
+			pageURL = probe.PageURL
+		}
 	}
 
 	quality := ""
@@ -495,7 +307,7 @@ func (a *App) recordDownload(jobID string) {
 		streamK = streamKey(q.URL)
 	}
 
-	_ = a.dlLog.Upsert(DownloadRecord{
+	_ = a.db.UpsertDownload(DownloadRecord{
 		Slug:      slug,
 		VideoID:   job.VideoID,
 		Quality:   quality,
@@ -503,5 +315,5 @@ func (a *App) recordDownload(jobID string) {
 		FileName:  job.FileName,
 		PageURL:   pageURL,
 		SavedAt:   time.Now(),
-	})
+	}, jobID)
 }

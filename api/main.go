@@ -6,7 +6,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
 	"time"
 )
@@ -17,16 +16,16 @@ var embeddedWeb embed.FS
 var webFS fs.FS
 
 type Config struct {
-	ListenAddr         string
-	OutputDir          string
-	DataDir            string
-	OutputLabel        string // human path shown in UI, e.g. maxi1508/Downloads/videos
-	FilebrowserURL     string // full folder URL for "open in Filebrowser" links
-	LibreTranslateURL  string
-	TranslateTo        string
-	ProbeTimeout       time.Duration
-	ChromePath      string
-	MaxDownloads    int
+	ListenAddr        string
+	OutputDir         string
+	DataDir           string
+	OutputLabel       string
+	FilebrowserURL    string
+	LibreTranslateURL string
+	TranslateTo       string
+	ProbeTimeout      time.Duration
+	ChromePath        string
+	MaxDownloads      int
 }
 
 func loadConfig() Config {
@@ -44,16 +43,16 @@ func loadConfig() Config {
 	}
 	listen := envOr("LISTEN_ADDR", ":8091")
 	return Config{
-		ListenAddr:         listen,
-		OutputDir:          envOr("OUTPUT_DIR", "/data/output"),
-		DataDir:            envOr("DATA_DIR", "/data/viddown"),
-		OutputLabel:        envOr("OUTPUT_LABEL", "Downloads/videos"),
+		ListenAddr:        listen,
+		OutputDir:         envOr("OUTPUT_DIR", "/data/output"),
+		DataDir:           envOr("DATA_DIR", "/data/viddown"),
+		OutputLabel:       envOr("OUTPUT_LABEL", "Downloads/videos"),
 		FilebrowserURL:    os.Getenv("FILEBROWSER_URL"),
 		LibreTranslateURL: os.Getenv("LIBRETRANSLATE_URL"),
 		TranslateTo:       envOr("TRANSLATE_TO", "en"),
-		ProbeTimeout:   timeout,
-		ChromePath:     os.Getenv("CHROME_PATH"),
-		MaxDownloads:   maxDL,
+		ProbeTimeout:      timeout,
+		ChromePath:        os.Getenv("CHROME_PATH"),
+		MaxDownloads:      maxDL,
 	}
 }
 
@@ -79,26 +78,37 @@ func main() {
 		log.Printf("warning: data dir: %v", err)
 	}
 
-	app := &App{
-		cfg:      cfg,
-		store:    NewStore(cfg.MaxDownloads),
-		dlLog:    NewDownloadLog(cfg.DataDir),
-		urlRules: NewURLRulesStore(cfg.DataDir),
+	db, err := OpenDatabase(cfg.DataDir)
+	if err != nil {
+		log.Fatalf("database: %v", err)
 	}
-	legacyLog := filepath.Join(cfg.OutputDir, ".viddown-downloads.json")
-	if n, err := app.dlLog.migrateFromLegacy(legacyLog); err != nil {
-		log.Printf("warning: migrate legacy download log: %v", err)
+	defer db.Close()
+
+	if err := db.ImportJSONIfEmpty(cfg.DataDir, cfg.OutputDir); err != nil {
+		log.Printf("warning: import legacy json: %v", err)
+	}
+	if n, err := db.MarkInterruptedJobs(); err != nil {
+		log.Printf("warning: mark interrupted jobs: %v", err)
 	} else if n > 0 {
-		log.Printf("migrated %d download log entries from output dir", n)
+		log.Printf("marked %d download job(s) interrupted after restart", n)
 	}
-	if app.dlLog.isEmpty() {
-		if n, err := app.dlLog.SeedFromOutputDir(cfg.OutputDir); err != nil {
-			log.Printf("warning: seed download log: %v", err)
-		} else if n > 0 {
-			log.Printf("seeded download log with %d entries from existing files", n)
-		}
+	if err := db.PruneOldProbes(50); err != nil {
+		log.Printf("warning: prune probes: %v", err)
 	}
-	log.Printf("viddown listening on %s (output %s, max downloads %d)", cfg.ListenAddr, cfg.OutputDir, cfg.MaxDownloads)
+
+	store := NewStore(cfg.MaxDownloads, db)
+	if err := store.LoadFromDB(); err != nil {
+		log.Printf("warning: load store from db: %v", err)
+	}
+
+	app := &App{
+		cfg:   cfg,
+		store: store,
+		db:    db,
+	}
+
+	log.Printf("viddown listening on %s (output %s, data %s, max downloads %d)",
+		cfg.ListenAddr, cfg.OutputDir, cfg.DataDir, cfg.MaxDownloads)
 	if err := http.ListenAndServe(cfg.ListenAddr, app.routes()); err != nil {
 		log.Fatal(err)
 	}

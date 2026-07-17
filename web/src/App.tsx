@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { SettingsDrawer } from "./components/SettingsDrawer";
 import "./App.css";
 import { applyUrlRules, type URLRulesConfig } from "./urlRules";
@@ -55,13 +55,50 @@ type DownloadJob = {
   probeId?: string;
   videoId?: string;
   qualityId?: string;
+  createdAt?: string;
 };
+
+function formatJobTime(iso?: string): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 
 /** videoId → qualityId (kept for all videos, including unchecked) */
 type QualityMap = Record<string, string>;
 
+const HISTORY_PAGE_SIZE = 15;
+
+type DownloadsResponse = {
+  active?: DownloadJob[];
+  history?: DownloadJob[];
+  total?: number;
+  limit?: number;
+  offset?: number;
+  downloads?: DownloadJob[];
+};
+
 function isActiveDownload(d: DownloadJob): boolean {
   return d.status === "queued" || d.status === "running";
+}
+
+function statusLabel(status: string): string {
+  switch (status) {
+    case "error":
+      return "Failed";
+    case "cancelled":
+      return "Cancelled";
+    case "done":
+      return "Done";
+    default:
+      return status;
+  }
 }
 
 async function readError(res: Response): Promise<string> {
@@ -113,6 +150,10 @@ export default function App() {
   const [focusVideoId, setFocusVideoId] = useState("");
   const [downloadId, setDownloadId] = useState<string | null>(null);
   const [downloads, setDownloads] = useState<DownloadJob[]>([]);
+  const [activeDownloads, setActiveDownloads] = useState<DownloadJob[]>([]);
+  const [historyDownloads, setHistoryDownloads] = useState<DownloadJob[]>([]);
+  const [historyTotal, setHistoryTotal] = useState(0);
+  const [historyOffset, setHistoryOffset] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [startingDownloads, setStartingDownloads] = useState(false);
@@ -126,6 +167,16 @@ export default function App() {
   const [clipboardPasting, setClipboardPasting] = useState(false);
   const [urlRules, setUrlRules] = useState<URLRulesConfig>({ rules: [] });
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const historyPanelRef = useRef<HTMLElement>(null);
+  const skipHistoryScrollRef = useRef(true);
+
+  useEffect(() => {
+    if (skipHistoryScrollRef.current) {
+      skipHistoryScrollRef.current = false;
+      return;
+    }
+    historyPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [historyOffset]);
 
   const videos = probe?.videos ?? [];
   const urlRewrite = useMemo(
@@ -260,20 +311,27 @@ export default function App() {
 
     const tick = async () => {
       try {
-        const res = await fetch("/api/downloads");
+        const qs = new URLSearchParams({
+          limit: String(HISTORY_PAGE_SIZE),
+          offset: String(historyOffset),
+        });
+        const res = await fetch(`/api/downloads?${qs}`);
         if (!res.ok || cancelled) return;
-        const data = await res.json();
+        const data: DownloadsResponse = await res.json();
         if (cancelled) return;
-        const list: DownloadJob[] = data.downloads ?? [];
-        setDownloads(list);
-        const active = list.some(isActiveDownload);
+        const active = data.active ?? [];
+        const history = data.history ?? data.downloads?.filter((d) => !isActiveDownload(d)) ?? [];
+        setActiveDownloads(active);
+        setHistoryDownloads(history);
+        setHistoryTotal(data.total ?? history.length);
+        setDownloads([...active, ...history]);
         if (downloadId) {
-          const mine = list.find((d) => d.id === downloadId);
+          const mine = [...active, ...history].find((d) => d.id === downloadId);
           if (mine && !isActiveDownload(mine) && mine.status === "error") {
             setError(mine.message || "Download failed");
           }
         }
-        schedule(active || downloadId ? 1500 : 12000);
+        schedule(active.length > 0 || downloadId ? 1500 : 12000);
       } catch {
         if (!cancelled) schedule(5000);
       }
@@ -284,7 +342,7 @@ export default function App() {
       cancelled = true;
       window.clearTimeout(timeoutId);
     };
-  }, [downloadId]);
+  }, [downloadId, historyOffset]);
 
   const probeReady = probe?.status === "ready";
   const previewVideoId = focusVideo?.id ?? "";
@@ -465,13 +523,144 @@ export default function App() {
   }
 
   const canRetry = (d: DownloadJob) =>
+    !d.id.startsWith("saved:") &&
     (d.status === "error" || d.status === "cancelled") &&
     !!(d.probeId && d.videoId && d.qualityId);
 
   const probing = probe?.status === "running";
   const ready = probe?.status === "ready" && videos.length > 0;
-  const activeDownloads = downloads.filter(isActiveDownload);
-  const recentDownloads = downloads.filter((d) => !isActiveDownload(d)).slice(0, 5);
+  const historyPage = Math.floor(historyOffset / HISTORY_PAGE_SIZE) + 1;
+  const historyPageCount = Math.max(1, Math.ceil(historyTotal / HISTORY_PAGE_SIZE));
+  const historyRangeStart = historyTotal === 0 ? 0 : historyOffset + 1;
+  const historyRangeEnd = Math.min(historyOffset + HISTORY_PAGE_SIZE, historyTotal);
+
+  const historySection = (
+    <section ref={historyPanelRef} className="panel history-panel">
+      <div className="jobs">
+        {activeDownloads.length > 0 && (
+          <>
+            <h2 className="jobs-title">
+              Running now ({activeDownloads.length})
+            </h2>
+            <p className="status">
+              Up to 10 downloads at once. They keep going if you close this tab
+              — use Cancel to stop them.
+            </p>
+            {activeDownloads.map((d) => (
+              <div key={d.id} className="progress-block">
+                <div className="progress-meta">
+                  <span className="job-label">
+                    {d.label || d.fileName || d.id.slice(0, 8)}
+                  </span>
+                  <span className="mono">{Math.round(d.progress)}%</span>
+                </div>
+                <p className="status">{d.message || d.status}</p>
+                <div className="bar">
+                  <div style={{ width: `${Math.min(100, d.progress)}%` }} />
+                </div>
+                <div className="job-actions">
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={() => onCancel(d.id)}
+                    disabled={cancellingId === d.id}
+                  >
+                    {cancellingId === d.id ? "Cancelling…" : "Cancel"}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </>
+        )}
+
+        <h2 className="jobs-title">Download history</h2>
+        <p className="status history-lede">
+          Saved videos, failed attempts, and cancelled downloads. Probe sessions
+          are not listed — only download activity.
+        </p>
+        {historyDownloads.length === 0 ? (
+          <p className="status history-empty">
+            No downloads yet. Probe a URL and save a stream — it will show up
+            here.
+          </p>
+        ) : (
+          historyDownloads.map((d) => (
+            <div key={d.id} className="progress-block recent">
+              <div className="progress-meta">
+                <span className="job-label">
+                  {d.label || d.fileName || d.id.slice(0, 8)}
+                </span>
+                <span className={`mono job-status status-${d.status}`}>
+                  {statusLabel(d.status)}
+                </span>
+              </div>
+              {formatJobTime(d.createdAt) && (
+                <p className="status job-time">{formatJobTime(d.createdAt)}</p>
+              )}
+              {d.status === "done" && (d.fileName || d.filePath) && (
+                <p className="ok">
+                  Saved → <code>{d.fileName || d.filePath}</code>
+                </p>
+              )}
+              {d.status === "done" && d.openUrl && (
+                <div className="job-actions">
+                  <a
+                    className="ghost link-btn"
+                    href={d.openUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    Open in Filebrowser
+                  </a>
+                </div>
+              )}
+              {(d.status === "error" || d.status === "cancelled") && (
+                <p className="status">{d.message || d.status}</p>
+              )}
+              {canRetry(d) && (
+                <div className="job-actions">
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={() => onRetry(d.id)}
+                    disabled={retryingId === d.id}
+                  >
+                    {retryingId === d.id ? "Retrying…" : "Retry"}
+                  </button>
+                </div>
+              )}
+            </div>
+          ))
+        )}
+        {historyTotal > HISTORY_PAGE_SIZE && (
+          <div className="history-pagination">
+            <button
+              type="button"
+              className="ghost"
+              disabled={historyOffset <= 0}
+              onClick={() =>
+                setHistoryOffset((o) => Math.max(0, o - HISTORY_PAGE_SIZE))
+              }
+            >
+              Previous
+            </button>
+            <span className="status history-page-meta">
+              {historyRangeStart}–{historyRangeEnd} of {historyTotal} · page{" "}
+              {historyPage} / {historyPageCount}
+            </span>
+            <button
+              type="button"
+              className="ghost"
+              disabled={historyOffset + HISTORY_PAGE_SIZE >= historyTotal}
+              onClick={() => setHistoryOffset((o) => o + HISTORY_PAGE_SIZE)}
+            >
+              Next
+            </button>
+          </div>
+        )}
+      </div>
+    </section>
+  );
 
   return (
     <div className={`page${ready ? " has-download-bar" : ""}`}>
@@ -514,47 +703,52 @@ export default function App() {
       </header>
 
       <main className="panel">
-        <form className="row probe-row" onSubmit={onProbe}>
-          <label className="field grow">
-            <span>URL</span>
-            <div className="url-input-row">
-              <div className="url-input-wrap">
-                <input
-                  value={url}
-                  onChange={(e) => {
-                    setUrl(e.target.value);
-                    setClipboardError(null);
-                  }}
-                  placeholder="https://…"
-                  required
-                  disabled={busy && probing}
-                  inputMode="url"
-                  autoCapitalize="off"
-                  autoCorrect="off"
-                  spellCheck={false}
-                  className={url ? "has-clear" : undefined}
-                />
-                {url && !(busy && probing) && (
-                  <button
-                    type="button"
-                    className="url-clear-btn"
-                    aria-label="Clear URL"
-                    onClick={() => {
-                      setUrl("");
+        <form className="probe-row" onSubmit={onProbe}>
+          <div className="probe-url-block">
+            <span className="probe-url-label">URL</span>
+            <div className="probe-url-main">
+              <div className="url-input-row">
+                <div className="url-input-wrap">
+                  <input
+                    value={url}
+                    onChange={(e) => {
+                      setUrl(e.target.value);
                       setClipboardError(null);
                     }}
-                  >
-                    ×
-                  </button>
-                )}
+                    placeholder="https://…"
+                    required
+                    disabled={busy && probing}
+                    inputMode="url"
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    className={url ? "has-clear" : undefined}
+                  />
+                  {url && !(busy && probing) && (
+                    <button
+                      type="button"
+                      className="url-clear-btn"
+                      aria-label="Clear URL"
+                      onClick={() => {
+                        setUrl("");
+                        setClipboardError(null);
+                      }}
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  className="ghost paste-btn"
+                  disabled={(busy && probing) || clipboardPasting}
+                  onClick={() => void pasteFromClipboard()}
+                >
+                  {clipboardPasting ? "…" : "Paste"}
+                </button>
               </div>
-              <button
-                type="button"
-                className="ghost paste-btn"
-                disabled={(busy && probing) || clipboardPasting}
-                onClick={() => void pasteFromClipboard()}
-              >
-                {clipboardPasting ? "…" : "Paste"}
+              <button type="submit" disabled={busy || !url.trim()}>
+                {probing ? "Probing…" : "Probe"}
               </button>
             </div>
             {clipboardError && (
@@ -567,10 +761,7 @@ export default function App() {
                 {urlRewrite.ruleName ? ` · ${urlRewrite.ruleName}` : ""}
               </p>
             )}
-          </label>
-          <button type="submit" disabled={busy || !url.trim()}>
-            {probing ? "Probing…" : "Probe"}
-          </button>
+          </div>
         </form>
 
         {(probe?.message || probing) && (
@@ -732,98 +923,10 @@ export default function App() {
           </>
         )}
 
-        {(activeDownloads.length > 0 || recentDownloads.length > 0) && (
-          <section className="jobs">
-            {activeDownloads.length > 0 && (
-              <>
-                <h2 className="jobs-title">
-                  Running now
-                  {activeDownloads.length > 0
-                    ? ` (${activeDownloads.length})`
-                    : ""}
-                </h2>
-                <p className="status">
-                  Up to 10 downloads at once. They keep going if you close this
-                  tab — use Cancel to stop them.
-                </p>
-                {activeDownloads.map((d) => (
-                  <div key={d.id} className="progress-block">
-                    <div className="progress-meta">
-                      <span className="job-label">
-                        {d.label || d.fileName || d.id.slice(0, 8)}
-                      </span>
-                      <span className="mono">{Math.round(d.progress)}%</span>
-                    </div>
-                    <p className="status">{d.message || d.status}</p>
-                    <div className="bar">
-                      <div style={{ width: `${Math.min(100, d.progress)}%` }} />
-                    </div>
-                    <div className="job-actions">
-                      <button
-                        type="button"
-                        className="ghost"
-                        onClick={() => onCancel(d.id)}
-                        disabled={cancellingId === d.id}
-                      >
-                        {cancellingId === d.id ? "Cancelling…" : "Cancel"}
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </>
-            )}
-            {recentDownloads.length > 0 && (
-              <>
-                <h2 className="jobs-title">Recent</h2>
-                {recentDownloads.map((d) => (
-                  <div key={d.id} className="progress-block recent">
-                    <div className="progress-meta">
-                      <span className="job-label">
-                        {d.label || d.fileName || d.id.slice(0, 8)}
-                      </span>
-                      <span className="mono">{d.status}</span>
-                    </div>
-                    {d.status === "done" && (d.fileName || d.filePath) && (
-                      <p className="ok">
-                        Saved → <code>{d.fileName || d.filePath}</code>
-                      </p>
-                    )}
-                    {d.status === "done" && d.openUrl && (
-                      <div className="job-actions">
-                        <a
-                          className="ghost link-btn"
-                          href={d.openUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                        >
-                          Open in Filebrowser
-                        </a>
-                      </div>
-                    )}
-                    {(d.status === "error" || d.status === "cancelled") && (
-                      <p className="status">{d.message || d.status}</p>
-                    )}
-                    {canRetry(d) && (
-                      <div className="job-actions">
-                        <button
-                          type="button"
-                          className="ghost"
-                          onClick={() => onRetry(d.id)}
-                          disabled={retryingId === d.id}
-                        >
-                          {retryingId === d.id ? "Retrying…" : "Retry"}
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </>
-            )}
-          </section>
-        )}
-
         {error && <p className="error">{error}</p>}
       </main>
+
+      {historySection}
     </div>
   );
 }

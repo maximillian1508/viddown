@@ -26,7 +26,7 @@ services:
     volumes:
       # Host folder ←→ container path the Go app writes to (OUTPUT_DIR)
       - ${HOST_OUTPUT_DIR}:${OUTPUT_DIR:-/data/output}
-      # App state (download log, etc.)
+      # App state: SQLite (viddown.db), legacy JSON imports
       - ${HOST_DATA_DIR:-./data}:${DATA_DIR:-/data/viddown}
     ports:
       - "${HOST_IP:-127.0.0.1}:${HOST_PORT:-8091}:${CONTAINER_PORT:-8091}"

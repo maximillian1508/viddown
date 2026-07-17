@@ -4,14 +4,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"os/exec"
+	"sort"
 	"strings"
 )
 
 type App struct {
-	cfg      Config
-	store    *Store
-	dlLog    *DownloadLog
-	urlRules *URLRulesStore
+	cfg   Config
+	store *Store
+	db    *Database
 }
 
 func (a *App) routes() http.Handler {
@@ -131,9 +131,92 @@ func (a *App) handleDownloadGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleDownloadList(w http.ResponseWriter, r *http.Request) {
+	limit, offset := parseHistoryQuery(r)
+	if a.db == nil {
+		jobs := a.store.ListDownloads(a.cfg.OutputLabel, a.cfg.FilebrowserURL)
+		active := make([]DownloadJob, 0)
+		finished := make([]DownloadJob, 0)
+		for _, j := range jobs {
+			if isActiveJobStatus(j.Status) {
+				active = append(active, j)
+			} else {
+				finished = append(finished, j)
+			}
+		}
+		total := len(finished)
+		if offset > total {
+			offset = total
+		}
+		end := offset + limit
+		if end > total {
+			end = total
+		}
+		history := finished[offset:end]
+		writeJSON(w, http.StatusOK, map[string]any{
+			"active":   active,
+			"history":  history,
+			"total":    total,
+			"limit":    limit,
+			"offset":   offset,
+			"downloads": append(active, history...), // legacy clients
+		})
+		return
+	}
+	active, history, total, err := a.listDownloadHistory(limit, offset)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"downloads": a.store.ListDownloads(a.cfg.OutputLabel, a.cfg.FilebrowserURL),
+		"active":   active,
+		"history":  history,
+		"total":    total,
+		"limit":    limit,
+		"offset":   offset,
+		"downloads": append(append([]DownloadJob{}, active...), history...),
 	})
+}
+
+func (a *App) mergeSavedIntoHistory(jobs []DownloadJob) []DownloadJob {
+	saved, err := a.db.ListSavedDownloads(0)
+	if err != nil || len(saved) == 0 {
+		return jobs
+	}
+	byFile := make(map[string]bool, len(jobs))
+	for _, j := range jobs {
+		if j.FileName != "" {
+			byFile[j.FileName] = true
+		}
+	}
+	for _, rec := range saved {
+		if byFile[rec.FileName] {
+			continue
+		}
+		label := rec.Slug
+		if rec.Quality != "" {
+			if label != "" {
+				label += " · "
+			}
+			label += rec.Quality
+		}
+		if label == "" {
+			label = rec.FileName
+		}
+		jobs = append(jobs, publicDownload(&DownloadJob{
+			ID:        "saved:" + rec.FileName,
+			Status:    "done",
+			Message:   "Saved on disk",
+			Label:     label,
+			Progress:  100,
+			FileName:  rec.FileName,
+			VideoID:   rec.VideoID,
+			CreatedAt: rec.SavedAt,
+		}, a.cfg.OutputLabel, a.cfg.FilebrowserURL))
+	}
+	sort.Slice(jobs, func(i, j int) bool {
+		return jobs[i].CreatedAt.After(jobs[j].CreatedAt)
+	})
+	return jobs
 }
 
 func (a *App) handleDownloadCancel(w http.ResponseWriter, r *http.Request) {

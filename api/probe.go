@@ -43,7 +43,7 @@ func (a *App) startProbe(pageURL string) (string, error) {
 		NameSlug:  nameSlugFromURL(pageURL),
 		CreatedAt: time.Now(),
 	}
-	a.store.PutProbe(job)
+	a.store.PutProbe(job, true)
 
 	go func() {
 		select {

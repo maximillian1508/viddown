@@ -8,11 +8,11 @@ import (
 )
 
 func (a *App) handleURLRulesGet(w http.ResponseWriter, r *http.Request) {
-	if a.urlRules == nil {
+	if a.db == nil {
 		writeJSON(w, http.StatusOK, URLRulesConfig{Rules: []URLRule{}})
 		return
 	}
-	cfg, err := a.urlRules.Load()
+	cfg, err := a.db.LoadURLRules()
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -21,8 +21,8 @@ func (a *App) handleURLRulesGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleURLRulesPut(w http.ResponseWriter, r *http.Request) {
-	if a.urlRules == nil {
-		writeErr(w, http.StatusInternalServerError, "url rules store unavailable")
+	if a.db == nil {
+		writeErr(w, http.StatusInternalServerError, "database unavailable")
 		return
 	}
 	var cfg URLRulesConfig
@@ -35,7 +35,7 @@ func (a *App) handleURLRulesPut(w http.ResponseWriter, r *http.Request) {
 			cfg.Rules[i].ID = uuid.NewString()
 		}
 	}
-	if err := a.urlRules.Save(cfg); err != nil {
+	if err := a.db.SaveURLRules(cfg); err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -44,16 +44,16 @@ func (a *App) handleURLRulesPut(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) handleURLRulesTest(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		URL   string         `json:"url"`
-		Rules []URLRule      `json:"rules,omitempty"`
+		URL   string    `json:"url"`
+		Rules []URLRule `json:"rules,omitempty"`
 	}
 	if err := jsonDecode(r, &body); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid json")
 		return
 	}
 	cfg := URLRulesConfig{Rules: body.Rules}
-	if len(body.Rules) == 0 && a.urlRules != nil {
-		loaded, err := a.urlRules.Load()
+	if len(body.Rules) == 0 && a.db != nil {
+		loaded, err := a.db.LoadURLRules()
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, err.Error())
 			return
