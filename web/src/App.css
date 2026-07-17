@@ -120,6 +120,18 @@
   min-width: 0;
 }
 
+.probe-row .field.grow {
+  flex: 0 0 auto;
+  width: 100%;
+}
+
+@media (min-width: 640px) {
+  .probe-row .field.grow {
+    flex: 1 1 240px;
+    width: auto;
+  }
+}
+
 .field {
   display: grid;
   gap: 0.35rem;
@@ -132,6 +144,7 @@
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--muted);
+  line-height: 1.2;
 }
 
 input,
