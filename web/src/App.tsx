@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
+import { SettingsDrawer } from "./components/SettingsDrawer";
 import "./App.css";
+import { applyUrlRules, type URLRulesConfig } from "./urlRules";
 
 type Quality = {
   id: string;
@@ -122,8 +124,14 @@ export default function App() {
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [clipboardError, setClipboardError] = useState<string | null>(null);
   const [clipboardPasting, setClipboardPasting] = useState(false);
+  const [urlRules, setUrlRules] = useState<URLRulesConfig>({ rules: [] });
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const videos = probe?.videos ?? [];
+  const urlRewrite = useMemo(
+    () => applyUrlRules(url, urlRules),
+    [url, urlRules],
+  );
   const selectedIds = useMemo(
     () => videos.map((v) => v.id).filter((id) => checkedIds[id]),
     [videos, checkedIds],
@@ -204,6 +212,22 @@ export default function App() {
     };
   }, [downloads, probeId, probe?.status]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/url-rules");
+        if (!res.ok || cancelled) return;
+        setUrlRules(await res.json());
+      } catch {
+        /* optional */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   async function pasteFromClipboard() {
     setClipboardError(null);
     setClipboardPasting(true);
@@ -217,7 +241,7 @@ export default function App() {
         setClipboardError("Clipboard is empty.");
         return;
       }
-      setUrl(text);
+      setUrl(applyUrlRules(text, urlRules).output);
       setError(null);
     } catch {
       setClipboardError("Could not read clipboard — allow access when prompted.");
@@ -343,11 +367,13 @@ export default function App() {
     setFocusVideoId("");
     setPreviewURL(null);
     setBusy(true);
+    const probeUrl = applyUrlRules(url, urlRules).output;
+    if (probeUrl !== url.trim()) setUrl(probeUrl);
     try {
       const res = await fetch("/api/probe", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url }),
+        body: JSON.stringify({ url: probeUrl }),
       });
       if (!res.ok) throw new Error(await readError(res));
       const data = await res.json();
@@ -449,6 +475,35 @@ export default function App() {
 
   return (
     <div className={`page${ready ? " has-download-bar" : ""}`}>
+      <button
+        type="button"
+        className="icon-btn page-settings-btn"
+        onClick={() => setSettingsOpen(true)}
+        aria-label="Open settings"
+      >
+        <svg
+          width="20"
+          height="20"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+          <circle cx="12" cy="12" r="3" />
+        </svg>
+      </button>
+
+      <SettingsDrawer
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        urlRules={urlRules}
+        onUrlRulesChange={setUrlRules}
+      />
+
       <header className="hero">
         <p className="brand">Viddown</p>
         <h1>Pull a stream into Filebrowser</h1>
@@ -504,6 +559,13 @@ export default function App() {
             </div>
             {clipboardError && (
               <p className="clipboard-error">{clipboardError}</p>
+            )}
+            {urlRewrite.changed && (
+              <p className="url-rewrite-hint">
+                Using{" "}
+                <code>{urlRewrite.output}</code>
+                {urlRewrite.ruleName ? ` · ${urlRewrite.ruleName}` : ""}
+              </p>
             )}
           </label>
           <button type="submit" disabled={busy || !url.trim()}>

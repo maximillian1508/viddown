@@ -80,9 +80,10 @@ func main() {
 	}
 
 	app := &App{
-		cfg:   cfg,
-		store: NewStore(cfg.MaxDownloads),
-		dlLog: NewDownloadLog(cfg.DataDir),
+		cfg:      cfg,
+		store:    NewStore(cfg.MaxDownloads),
+		dlLog:    NewDownloadLog(cfg.DataDir),
+		urlRules: NewURLRulesStore(cfg.DataDir),
 	}
 	legacyLog := filepath.Join(cfg.OutputDir, ".viddown-downloads.json")
 	if n, err := app.dlLog.migrateFromLegacy(legacyLog); err != nil {

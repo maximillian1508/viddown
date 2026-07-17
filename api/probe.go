@@ -28,6 +28,11 @@ func (a *App) startProbe(pageURL string) (string, error) {
 	if pageURL == "" {
 		return "", fmt.Errorf("url required")
 	}
+	rewritten, err := a.rewritePageURL(pageURL)
+	if err != nil {
+		return "", fmt.Errorf("url rules: %w", err)
+	}
+	pageURL = rewritten
 
 	id := uuid.NewString()
 	job := &ProbeJob{

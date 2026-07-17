@@ -8,9 +8,10 @@ import (
 )
 
 type App struct {
-	cfg   Config
-	store *Store
-	dlLog *DownloadLog
+	cfg      Config
+	store    *Store
+	dlLog    *DownloadLog
+	urlRules *URLRulesStore
 }
 
 func (a *App) routes() http.Handler {
@@ -24,6 +25,9 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("GET /api/download/{id}", a.handleDownloadGet)
 	mux.HandleFunc("POST /api/download/{id}/cancel", a.handleDownloadCancel)
 	mux.HandleFunc("POST /api/download/{id}/retry", a.handleDownloadRetry)
+	mux.HandleFunc("GET /api/url-rules", a.handleURLRulesGet)
+	mux.HandleFunc("PUT /api/url-rules", a.handleURLRulesPut)
+	mux.HandleFunc("POST /api/url-rules/test", a.handleURLRulesTest)
 	mux.Handle("/", a.spaHandler())
 	return withCORS(mux)
 }
@@ -32,7 +36,7 @@ func withCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return
