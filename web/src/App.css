@@ -147,6 +147,66 @@
   line-height: 1.2;
 }
 
+.url-input-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: stretch;
+  min-width: 0;
+}
+
+.url-input-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.url-input-wrap input {
+  width: 100%;
+}
+
+.url-input-wrap input.has-clear {
+  padding-right: 2.75rem;
+}
+
+.url-clear-btn {
+  position: absolute;
+  right: 0.35rem;
+  top: 50%;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  min-height: 0;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 1.35rem;
+  line-height: 1;
+  font-weight: 400;
+}
+
+.url-clear-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+  color: var(--ink);
+}
+
+.paste-btn {
+  flex: 0 0 auto;
+  min-width: 4.75rem;
+  padding-left: 0.75rem;
+  padding-right: 0.75rem;
+}
+
+.clipboard-error {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--danger);
+  line-height: 1.35;
+}
+
 input,
 select {
   width: 100%;

@@ -98,6 +98,10 @@ function defaultQualityId(v: Video): string {
   return v.qualities[0]?.id ?? "";
 }
 
+function cleanClipboardText(raw: string): string {
+  return raw.trim().split(/\r?\n/)[0]?.trim() ?? "";
+}
+
 export default function App() {
   const [url, setUrl] = useState("");
   const [probeId, setProbeId] = useState<string | null>(null);
@@ -116,6 +120,8 @@ export default function App() {
   const [previewKind, setPreviewKind] = useState<"video" | "image" | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const [clipboardError, setClipboardError] = useState<string | null>(null);
+  const [clipboardPasting, setClipboardPasting] = useState(false);
 
   const videos = probe?.videos ?? [];
   const selectedIds = useMemo(
@@ -197,6 +203,28 @@ export default function App() {
       cancelled = true;
     };
   }, [downloads, probeId, probe?.status]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function pasteFromClipboard() {
+    setClipboardError(null);
+    setClipboardPasting(true);
+    try {
+      if (!navigator.clipboard?.readText) {
+        setClipboardError("Clipboard paste is not supported in this browser.");
+        return;
+      }
+      const text = cleanClipboardText(await navigator.clipboard.readText());
+      if (!text) {
+        setClipboardError("Clipboard is empty.");
+        return;
+      }
+      setUrl(text);
+      setError(null);
+    } catch {
+      setClipboardError("Could not read clipboard — allow access when prompted.");
+    } finally {
+      setClipboardPasting(false);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -434,17 +462,49 @@ export default function App() {
         <form className="row probe-row" onSubmit={onProbe}>
           <label className="field grow">
             <span>URL</span>
-            <input
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              placeholder="https://…"
-              required
-              disabled={busy && probing}
-              inputMode="url"
-              autoCapitalize="off"
-              autoCorrect="off"
-              spellCheck={false}
-            />
+            <div className="url-input-row">
+              <div className="url-input-wrap">
+                <input
+                  value={url}
+                  onChange={(e) => {
+                    setUrl(e.target.value);
+                    setClipboardError(null);
+                  }}
+                  placeholder="https://…"
+                  required
+                  disabled={busy && probing}
+                  inputMode="url"
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  className={url ? "has-clear" : undefined}
+                />
+                {url && !(busy && probing) && (
+                  <button
+                    type="button"
+                    className="url-clear-btn"
+                    aria-label="Clear URL"
+                    onClick={() => {
+                      setUrl("");
+                      setClipboardError(null);
+                    }}
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+              <button
+                type="button"
+                className="ghost paste-btn"
+                disabled={(busy && probing) || clipboardPasting}
+                onClick={() => void pasteFromClipboard()}
+              >
+                {clipboardPasting ? "…" : "Paste"}
+              </button>
+            </div>
+            {clipboardError && (
+              <p className="clipboard-error">{clipboardError}</p>
+            )}
           </label>
           <button type="submit" disabled={busy || !url.trim()}>
             {probing ? "Probing…" : "Probe"}
