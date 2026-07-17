@@ -265,6 +265,7 @@ func (a *App) runDownload(jobID string, q *Quality, fileName string, meta fileMe
 		j.FilePath = outPath
 		j.FileName = fileName
 	})
+	a.recordDownload(jobID)
 }
 
 func (a *App) runDownloadNoBSF(jobID string, q *Quality, fileName, outPath string, meta fileMeta, ctx context.Context) {
@@ -360,6 +361,7 @@ func (a *App) runDownloadNoBSF(jobID string, q *Quality, fileName, outPath strin
 		j.FilePath = outPath
 		j.FileName = fileName
 	})
+	a.recordDownload(jobID)
 }
 
 func (a *App) failDownload(jobID, msg string) {

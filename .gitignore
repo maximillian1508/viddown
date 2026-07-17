@@ -18,6 +18,7 @@ api/vendor/
 *~
 # logs / temp
 *.log
+data/
 # old Wails / local CLI leftovers (if mixed into this folder)
 hls-download
 downloads/

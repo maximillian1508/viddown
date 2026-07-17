@@ -10,6 +10,7 @@ import (
 type App struct {
 	cfg   Config
 	store *Store
+	dlLog *DownloadLog
 }
 
 func (a *App) routes() http.Handler {
@@ -85,7 +86,7 @@ func (a *App) handleProbeCreate(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) handleProbeGet(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	job, ok := a.store.GetProbe(id)
+	job, ok := a.probeJobForAPI(id)
 	if !ok {
 		writeErr(w, http.StatusNotFound, "probe not found")
 		return

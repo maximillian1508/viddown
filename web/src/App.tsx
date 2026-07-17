@@ -9,6 +9,8 @@ type Quality = {
   bandwidth?: number;
   duration?: string;
   estimatedBytes?: number;
+  onDisk?: boolean;
+  onDiskFile?: string;
   url: string;
 };
 
@@ -177,6 +179,24 @@ export default function App() {
       stop();
     };
   }, [probeId]);
+
+  // Refresh probe after a download completes so "Already saved" labels appear.
+  useEffect(() => {
+    if (!probeId || probe?.status !== "ready") return;
+    const doneForProbe = downloads.some(
+      (d) => d.probeId === probeId && d.status === "done",
+    );
+    if (!doneForProbe) return;
+    let cancelled = false;
+    (async () => {
+      const res = await fetch(`/api/probe/${probeId}`);
+      if (!res.ok || cancelled) return;
+      setProbe(await res.json());
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [downloads, probeId, probe?.status]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     let cancelled = false;
@@ -452,6 +472,7 @@ export default function App() {
               {videos.map((v) => {
                 const checked = !!checkedIds[v.id];
                 const qid = qualityByVideo[v.id] ?? defaultQualityId(v);
+                const selectedQuality = v.qualities.find((q) => q.id === qid);
                 const focused = focusVideo?.id === v.id;
                 return (
                   <li
@@ -475,6 +496,9 @@ export default function App() {
                         {v.likelyAd && (
                           <span className="video-badge video-badge-ad">Likely ad</span>
                         )}
+                        {selectedQuality?.onDisk && (
+                          <span className="video-badge video-badge-saved">Already saved</span>
+                        )}
                       </span>
                     </label>
                     <select
@@ -486,7 +510,9 @@ export default function App() {
                     >
                       {v.qualities.map((q) => (
                         <option key={q.id} value={q.id}>
-                          {q.label || "Stream"}
+                          {[q.label || "Stream", q.onDisk ? "· saved" : ""]
+                            .filter(Boolean)
+                            .join(" ")}
                         </option>
                       ))}
                     </select>
@@ -538,6 +564,11 @@ export default function App() {
                               ]
                                 .filter(Boolean)
                                 .join(" · ")}
+                            </p>
+                          )}
+                          {focusQuality?.onDiskFile && (
+                            <p className="status saved-hint">
+                              Already on disk: {focusQuality.onDiskFile}
                             </p>
                           )}
                         </div>

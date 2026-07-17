@@ -457,6 +457,24 @@ func annotateAndSortVideos(videos []Video) {
 	})
 }
 
+// renumberVideoIDs assigns v1 to the longest stream, v2 next, etc. (after duration sort).
+func renumberVideoIDs(videos []Video) {
+	for i := range videos {
+		videos[i].ID = fmt.Sprintf("v%d", i+1)
+	}
+}
+
+func downloadFileStem(slug, resolution, videoID string) string {
+	parts := []string{slug}
+	if resolution != "" {
+		parts = append(parts, prettyResolution(resolution))
+	}
+	if videoID != "" {
+		parts = append(parts, videoID)
+	}
+	return strings.Join(parts, "_")
+}
+
 func sortQualities(qs []Quality) {
 	sort.SliceStable(qs, func(i, j int) bool {
 		if qs[i].Bandwidth != qs[j].Bandwidth {
@@ -564,15 +582,9 @@ func sanitizeSlug(s string) string {
 }
 
 func buildDownloadFileName(slug, resolution, videoID, uniq string) string {
-	parts := []string{slug}
-	if resolution != "" {
-		parts = append(parts, prettyResolution(resolution))
-	}
-	if videoID != "" {
-		parts = append(parts, videoID)
-	}
+	name := downloadFileStem(slug, resolution, videoID)
 	if uniq != "" {
-		parts = append(parts, uniq)
+		name += "_" + uniq
 	}
-	return strings.Join(parts, "_") + ".mp4"
+	return name + ".mp4"
 }

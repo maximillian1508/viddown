@@ -16,6 +16,8 @@ type Quality struct {
 	Bandwidth       int               `json:"bandwidth,omitempty"`
 	Duration        string            `json:"duration,omitempty"`
 	EstimatedBytes  int64             `json:"estimatedBytes,omitempty"`
+	OnDisk          bool              `json:"onDisk,omitempty"`
+	OnDiskFile      string            `json:"onDiskFile,omitempty"`
 	URL             string            `json:"url"`
 	Headers    map[string]string `json:"-"`
 }

@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 )
@@ -16,9 +17,10 @@ var embeddedWeb embed.FS
 var webFS fs.FS
 
 type Config struct {
-	ListenAddr      string
-	OutputDir       string
-	OutputLabel     string // human path shown in UI, e.g. maxi1508/Downloads/videos
+	ListenAddr         string
+	OutputDir          string
+	DataDir            string
+	OutputLabel        string // human path shown in UI, e.g. maxi1508/Downloads/videos
 	FilebrowserURL     string // full folder URL for "open in Filebrowser" links
 	LibreTranslateURL  string
 	TranslateTo        string
@@ -42,9 +44,10 @@ func loadConfig() Config {
 	}
 	listen := envOr("LISTEN_ADDR", ":8091")
 	return Config{
-		ListenAddr:     listen,
-		OutputDir:      envOr("OUTPUT_DIR", "/data/output"),
-		OutputLabel:    envOr("OUTPUT_LABEL", "Downloads/videos"),
+		ListenAddr:         listen,
+		OutputDir:          envOr("OUTPUT_DIR", "/data/output"),
+		DataDir:            envOr("DATA_DIR", "/data/viddown"),
+		OutputLabel:        envOr("OUTPUT_LABEL", "Downloads/videos"),
 		FilebrowserURL:    os.Getenv("FILEBROWSER_URL"),
 		LibreTranslateURL: os.Getenv("LIBRETRANSLATE_URL"),
 		TranslateTo:       envOr("TRANSLATE_TO", "en"),
@@ -72,8 +75,28 @@ func main() {
 	if err := os.MkdirAll(cfg.OutputDir, 0o755); err != nil {
 		log.Printf("warning: output dir: %v", err)
 	}
+	if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
+		log.Printf("warning: data dir: %v", err)
+	}
 
-	app := &App{cfg: cfg, store: NewStore(cfg.MaxDownloads)}
+	app := &App{
+		cfg:   cfg,
+		store: NewStore(cfg.MaxDownloads),
+		dlLog: NewDownloadLog(cfg.DataDir),
+	}
+	legacyLog := filepath.Join(cfg.OutputDir, ".viddown-downloads.json")
+	if n, err := app.dlLog.migrateFromLegacy(legacyLog); err != nil {
+		log.Printf("warning: migrate legacy download log: %v", err)
+	} else if n > 0 {
+		log.Printf("migrated %d download log entries from output dir", n)
+	}
+	if app.dlLog.isEmpty() {
+		if n, err := app.dlLog.SeedFromOutputDir(cfg.OutputDir); err != nil {
+			log.Printf("warning: seed download log: %v", err)
+		} else if n > 0 {
+			log.Printf("seeded download log with %d entries from existing files", n)
+		}
+	}
 	log.Printf("viddown listening on %s (output %s, max downloads %d)", cfg.ListenAddr, cfg.OutputDir, cfg.MaxDownloads)
 	if err := http.ListenAndServe(cfg.ListenAddr, app.routes()); err != nil {
 		log.Fatal(err)

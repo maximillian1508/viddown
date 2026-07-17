@@ -10,6 +10,7 @@ services:
     environment:
       TZ: ${TZ:-Asia/Kuala_Lumpur}
       OUTPUT_DIR: ${OUTPUT_DIR:-/data/output}
+      DATA_DIR: ${DATA_DIR:-/data/viddown}
       LISTEN_ADDR: ${LISTEN_ADDR:-:8091}
       PROBE_TIMEOUT: ${PROBE_TIMEOUT:-45s}
       CHROME_PATH: ${CHROME_PATH:-/usr/bin/chromium}
@@ -25,6 +26,8 @@ services:
     volumes:
       # Host folder ←→ container path the Go app writes to (OUTPUT_DIR)
       - ${HOST_OUTPUT_DIR}:${OUTPUT_DIR:-/data/output}
+      # App state (download log, etc.)
+      - ${HOST_DATA_DIR:-./data}:${DATA_DIR:-/data/viddown}
     ports:
       - "${HOST_IP:-127.0.0.1}:${HOST_PORT:-8091}:${CONTAINER_PORT:-8091}"
     labels:

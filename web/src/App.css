@@ -247,6 +247,16 @@ button.primary:hover:not(:disabled) {
   border: 1px solid #fdba74;
 }
 
+.video-badge-saved {
+  color: #166534;
+  background: #dcfce7;
+  border: 1px solid #86efac;
+}
+
+.saved-hint {
+  color: #166534;
+}
+
 .video-row select {
   padding: 0.45rem 0.65rem;
 }

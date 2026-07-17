@@ -68,12 +68,14 @@ func (a *App) startProbe(pageURL string) (string, error) {
 			return
 		}
 		annotateAndSortVideos(videos)
+		renumberVideoIDs(videos)
 		if pageTitle != "" && a.cfg.LibreTranslateURL != "" && needsTranslation(cleanPageTitle(pageTitle)) {
 			a.store.UpdateProbe(id, func(j *ProbeJob) {
 				j.Message = "Translating page title…"
 			})
 		}
 		nameSlug, title := a.nameSlugForPage(pageURL, pageTitle)
+		a.annotateExistingFromLog(videos, pageURL, nameSlug)
 		a.store.UpdateProbe(id, func(j *ProbeJob) {
 			j.Status = "ready"
 			j.Message = fmt.Sprintf("Found %d video(s)", len(videos))
