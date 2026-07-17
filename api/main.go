@@ -96,15 +96,19 @@ func main() {
 		log.Printf("warning: prune probes: %v", err)
 	}
 
-	store := NewStore(cfg.MaxDownloads, db)
+	store := NewStore(cfg.MaxDownloads, db, nil)
 	if err := store.LoadFromDB(); err != nil {
 		log.Printf("warning: load store from db: %v", err)
 	}
 
+	events := newEventHub(cfg.OutputLabel, cfg.FilebrowserURL)
+	store.events = events
+
 	app := &App{
-		cfg:   cfg,
-		store: store,
-		db:    db,
+		cfg:    cfg,
+		store:  store,
+		db:     db,
+		events: events,
 	}
 
 	log.Printf("viddown listening on %s (output %s, data %s, max downloads %d)",

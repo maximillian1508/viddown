@@ -61,6 +61,7 @@ type DownloadJob struct {
 type Store struct {
 	mu        sync.RWMutex
 	db        *Database
+	events    *eventHub
 	probes    map[string]*ProbeJob
 	downloads map[string]*DownloadJob
 	probeSem  chan struct{}
@@ -68,12 +69,13 @@ type Store struct {
 	maxDL     int
 }
 
-func NewStore(maxDownloads int, db *Database) *Store {
+func NewStore(maxDownloads int, db *Database, events *eventHub) *Store {
 	if maxDownloads < 1 {
 		maxDownloads = 10
 	}
 	return &Store{
 		db:        db,
+		events:    events,
 		probes:    make(map[string]*ProbeJob),
 		downloads: make(map[string]*DownloadJob),
 		probeSem:  make(chan struct{}, 1),
@@ -133,6 +135,7 @@ func (s *Store) PutProbe(j *ProbeJob, persist bool) {
 	if persist && s.db != nil {
 		_ = s.db.SaveProbe(j)
 	}
+	s.emitProbe(j.ID)
 }
 
 func (s *Store) GetProbe(id string) (*ProbeJob, bool) {
@@ -173,6 +176,20 @@ func (s *Store) UpdateProbe(id string, fn func(*ProbeJob)) {
 			_ = s.db.SaveProbe(cp)
 		}
 	}
+	if ok {
+		s.emitProbe(id)
+	}
+}
+
+func (s *Store) emitProbe(id string) {
+	if s.events == nil {
+		return
+	}
+	job, ok := s.GetProbe(id)
+	if !ok {
+		return
+	}
+	s.events.publishProbe(job)
 }
 
 func (s *Store) FindQuality(probeID, videoID, qualityID string) (*Quality, string, bool) {
@@ -212,6 +229,7 @@ func (s *Store) PutDownload(j *DownloadJob) {
 	if s.db != nil {
 		_ = s.db.SaveDownloadJob(j)
 	}
+	s.emitDownload(j.ID)
 }
 
 func (s *Store) GetDownload(id string) (*DownloadJob, bool) {
@@ -288,6 +306,20 @@ func (s *Store) UpdateDownload(id string, fn func(*DownloadJob)) {
 			_ = s.db.SaveDownloadJob(cp)
 		}
 	}
+	if ok {
+		s.emitDownload(id)
+	}
+}
+
+func (s *Store) emitDownload(id string) {
+	if s.events == nil {
+		return
+	}
+	job, ok := s.GetDownload(id)
+	if !ok {
+		return
+	}
+	s.events.publishDownload(job)
 }
 
 func (s *Store) SetDownloadCancel(id string, cancel context.CancelFunc) {
@@ -316,6 +348,7 @@ func (s *Store) CancelDownload(id string) bool {
 		if s.db != nil {
 			_ = s.db.SaveDownloadJob(j)
 		}
+		s.emitDownload(id)
 		return true
 	default:
 		s.mu.Unlock()

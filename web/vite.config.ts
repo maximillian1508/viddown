@@ -47,12 +47,8 @@ export default defineConfig({
         navigateFallback: "/index.html",
         navigateFallbackDenylist: [/^\/api\//],
         globPatterns: ["**/*.{js,css,html,ico,png,svg,webmanifest}"],
-        runtimeCaching: [
-          {
-            urlPattern: ({ url }) => url.pathname.startsWith("/api/"),
-            handler: "NetworkOnly",
-          },
-        ],
+        importScripts: ["sw-sse-bypass.js"],
+        // Do not route /api/* through Workbox — long-lived SSE breaks when intercepted.
       },
       devOptions: {
         enabled: false,

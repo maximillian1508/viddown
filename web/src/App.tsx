@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { SettingsDrawer } from "./components/SettingsDrawer";
 import "./App.css";
 import { applyUrlRules, type URLRulesConfig } from "./urlRules";
+import { connectEventStream } from "./sse";
 
 type Quality = {
   id: string;
@@ -169,6 +170,141 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const historyPanelRef = useRef<HTMLElement>(null);
   const skipHistoryScrollRef = useRef(true);
+  const probeIdRef = useRef<string | null>(null);
+  const downloadIdRef = useRef<string | null>(null);
+  const historyOffsetRef = useRef(0);
+  const refetchProbeAnnotatedRef = useRef<() => Promise<void>>(async () => {});
+  const applyTerminalDownloadRef = useRef<(job: DownloadJob) => void>(() => {});
+  probeIdRef.current = probeId;
+  downloadIdRef.current = downloadId;
+  historyOffsetRef.current = historyOffset;
+
+  const fetchDownloads = useCallback(async () => {
+    const qs = new URLSearchParams({
+      limit: String(HISTORY_PAGE_SIZE),
+      offset: String(historyOffsetRef.current),
+    });
+    try {
+      const res = await fetch(`/api/downloads?${qs}`);
+      if (!res.ok) return;
+      const data: DownloadsResponse = await res.json();
+      const active = data.active ?? [];
+      const history =
+        data.history ?? data.downloads?.filter((d) => !isActiveDownload(d)) ?? [];
+      setActiveDownloads(active);
+      setHistoryDownloads(history);
+      setHistoryTotal(data.total ?? history.length);
+      setDownloads([...active, ...history]);
+      const tracked = downloadIdRef.current;
+      if (tracked) {
+        const mine = [...active, ...history].find((d) => d.id === tracked);
+        if (mine && !isActiveDownload(mine) && mine.status === "error") {
+          setError(mine.message || "Download failed");
+        }
+      }
+    } catch {
+      /* optional */
+    }
+  }, []);
+
+  const refetchProbeAnnotated = useCallback(async () => {
+    const id = probeIdRef.current;
+    if (!id) return;
+    try {
+      const res = await fetch(`/api/probe/${id}`);
+      if (res.ok) setProbe(await res.json());
+    } catch {
+      /* optional */
+    }
+  }, []);
+
+  const applyTerminalDownload = useCallback((job: DownloadJob) => {
+    setActiveDownloads((prev) => prev.filter((d) => d.id !== job.id));
+    if (downloadIdRef.current === job.id && job.status === "error") {
+      setError(job.message || "Download failed");
+    }
+    setHistoryDownloads((prev) => {
+      const existed = prev.some((d) => d.id === job.id);
+      if (!existed) {
+        setHistoryTotal((t) => t + 1);
+      }
+      if (historyOffsetRef.current !== 0) {
+        return prev;
+      }
+      const without = prev.filter((d) => d.id !== job.id);
+      return [job, ...without].slice(0, HISTORY_PAGE_SIZE);
+    });
+    setDownloads((prev) => {
+      const rest = prev.filter((d) => d.id !== job.id);
+      return [job, ...rest];
+    });
+    void refetchProbeAnnotated();
+  }, [refetchProbeAnnotated]);
+
+  refetchProbeAnnotatedRef.current = refetchProbeAnnotated;
+  applyTerminalDownloadRef.current = applyTerminalDownload;
+
+  useEffect(() => {
+    void fetchDownloads();
+  }, [fetchDownloads, historyOffset]);
+
+  useEffect(() => {
+    return connectEventStream("/api/events", {
+      onEvent: (event, data) => {
+        if (event === "connected" || event === "history") return;
+
+        if (event === "probe") {
+          let probeData: ProbeJob;
+          try {
+            probeData = JSON.parse(data) as ProbeJob;
+          } catch {
+            return;
+          }
+          if (probeData.id !== probeIdRef.current) return;
+
+          if (probeData.status === "ready") {
+            void refetchProbeAnnotatedRef.current().then(() => setBusy(false));
+            return;
+          }
+
+          setProbe(probeData);
+          if (probeData.status === "error") {
+            setBusy(false);
+            setError(probeData.message || "Probe failed");
+          }
+          return;
+        }
+
+        if (event === "download") {
+          let job: DownloadJob;
+          try {
+            job = JSON.parse(data) as DownloadJob;
+          } catch {
+            return;
+          }
+
+          if (isActiveDownload(job)) {
+            setActiveDownloads((prev) => {
+              const idx = prev.findIndex((d) => d.id === job.id);
+              if (idx >= 0) {
+                const next = [...prev];
+                next[idx] = job;
+                return next;
+              }
+              return [job, ...prev];
+            });
+            setDownloads((prev) => {
+              const rest = prev.filter((d) => d.id !== job.id);
+              return [job, ...rest];
+            });
+            return;
+          }
+
+          applyTerminalDownloadRef.current(job);
+        }
+      },
+    });
+  }, []);
 
   useEffect(() => {
     if (skipHistoryScrollRef.current) {
@@ -216,54 +352,6 @@ export default function App() {
   }, [probe?.status, probe?.id]); // eslint-disable-line react-hooks/exhaustive-deps -- init once per probe
 
   useEffect(() => {
-    if (!probeId) return;
-    let cancelled = false;
-    let intervalId = 0;
-    const stop = () => {
-      if (intervalId) {
-        window.clearInterval(intervalId);
-        intervalId = 0;
-      }
-    };
-    const tick = async () => {
-      const res = await fetch(`/api/probe/${probeId}`);
-      if (!res.ok || cancelled) return;
-      const data: ProbeJob = await res.json();
-      if (cancelled) return;
-      setProbe(data);
-      if (data.status === "ready" || data.status === "error") {
-        stop();
-        setBusy(false);
-        if (data.status === "error") setError(data.message || "Probe failed");
-      }
-    };
-    tick();
-    intervalId = window.setInterval(tick, 1500);
-    return () => {
-      cancelled = true;
-      stop();
-    };
-  }, [probeId]);
-
-  // Refresh probe after a download completes so "Already saved" labels appear.
-  useEffect(() => {
-    if (!probeId || probe?.status !== "ready") return;
-    const doneForProbe = downloads.some(
-      (d) => d.probeId === probeId && d.status === "done",
-    );
-    if (!doneForProbe) return;
-    let cancelled = false;
-    (async () => {
-      const res = await fetch(`/api/probe/${probeId}`);
-      if (!res.ok || cancelled) return;
-      setProbe(await res.json());
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [downloads, probeId, probe?.status]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
@@ -300,49 +388,6 @@ export default function App() {
       setClipboardPasting(false);
     }
   }
-
-  useEffect(() => {
-    let cancelled = false;
-    let timeoutId = 0;
-
-    const schedule = (ms: number) => {
-      timeoutId = window.setTimeout(tick, ms);
-    };
-
-    const tick = async () => {
-      try {
-        const qs = new URLSearchParams({
-          limit: String(HISTORY_PAGE_SIZE),
-          offset: String(historyOffset),
-        });
-        const res = await fetch(`/api/downloads?${qs}`);
-        if (!res.ok || cancelled) return;
-        const data: DownloadsResponse = await res.json();
-        if (cancelled) return;
-        const active = data.active ?? [];
-        const history = data.history ?? data.downloads?.filter((d) => !isActiveDownload(d)) ?? [];
-        setActiveDownloads(active);
-        setHistoryDownloads(history);
-        setHistoryTotal(data.total ?? history.length);
-        setDownloads([...active, ...history]);
-        if (downloadId) {
-          const mine = [...active, ...history].find((d) => d.id === downloadId);
-          if (mine && !isActiveDownload(mine) && mine.status === "error") {
-            setError(mine.message || "Download failed");
-          }
-        }
-        schedule(active.length > 0 || downloadId ? 1500 : 12000);
-      } catch {
-        if (!cancelled) schedule(5000);
-      }
-    };
-
-    tick();
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timeoutId);
-    };
-  }, [downloadId, historyOffset]);
 
   const probeReady = probe?.status === "ready";
   const previewVideoId = focusVideo?.id ?? "";
@@ -415,6 +460,26 @@ export default function App() {
     setCheckedIds({});
   }
 
+  function promoteActiveDownload(job: DownloadJob) {
+    setActiveDownloads((prev) => {
+      const idx = prev.findIndex((d) => d.id === job.id);
+      if (idx >= 0) {
+        const next = [...prev];
+        next[idx] = job;
+        return next;
+      }
+      return [job, ...prev];
+    });
+  }
+
+  function removeFromHistory(id: string) {
+    setHistoryDownloads((prev) => {
+      if (!prev.some((d) => d.id === id)) return prev;
+      setHistoryTotal((t) => Math.max(0, t - 1));
+      return prev.filter((d) => d.id !== id);
+    });
+  }
+
   async function onProbe(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
@@ -470,8 +535,9 @@ export default function App() {
           errors.push(`${videoId}: ${await readError(res)}`);
           continue;
         }
-        const data = await res.json();
+        const data: DownloadJob = await res.json();
         lastId = data.id;
+        promoteActiveDownload(data);
       }
       if (lastId) setDownloadId(lastId);
       if (errors.length) {
@@ -495,10 +561,7 @@ export default function App() {
       const res = await fetch(`/api/download/${id}/cancel`, { method: "POST" });
       if (!res.ok) throw new Error(await readError(res));
       const data: DownloadJob = await res.json();
-      setDownloads((prev) => {
-        const rest = prev.filter((d) => d.id !== data.id);
-        return [data, ...rest];
-      });
+      applyTerminalDownload(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Cancel failed");
     } finally {
@@ -512,9 +575,10 @@ export default function App() {
     try {
       const res = await fetch(`/api/download/${id}/retry`, { method: "POST" });
       if (!res.ok) throw new Error(await readError(res));
-      const data = await res.json();
-      setDownloadId(data.id);
-      setDownloads((prev) => prev.filter((d) => d.id !== id));
+      const job: DownloadJob = await res.json();
+      removeFromHistory(id);
+      setDownloadId(job.id);
+      promoteActiveDownload(job);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Retry failed");
     } finally {

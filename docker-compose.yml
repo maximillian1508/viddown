@@ -36,6 +36,7 @@ services:
       - traefik.http.routers.viddown.entrypoints=${TRAEFIK_ENTRYPOINT:-websecure}
       - traefik.http.routers.viddown.tls.certresolver=${TRAEFIK_CERTRESOLVER:-cf}
       - traefik.http.services.viddown.loadbalancer.server.port=${CONTAINER_PORT:-8091}
+      - traefik.http.services.viddown.loadbalancer.responseForwarding.flushInterval=1ms
     networks:
       - default
       - proxy

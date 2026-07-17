@@ -9,9 +9,10 @@ import (
 )
 
 type App struct {
-	cfg   Config
-	store *Store
-	db    *Database
+	cfg    Config
+	store  *Store
+	db     *Database
+	events *eventHub
 }
 
 func (a *App) routes() http.Handler {
@@ -22,6 +23,7 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("GET /api/preview", a.handlePreview)
 	mux.HandleFunc("POST /api/download", a.handleDownloadCreate)
 	mux.HandleFunc("GET /api/downloads", a.handleDownloadList)
+	mux.HandleFunc("GET /api/events", a.handleEvents)
 	mux.HandleFunc("GET /api/download/{id}", a.handleDownloadGet)
 	mux.HandleFunc("POST /api/download/{id}/cancel", a.handleDownloadCancel)
 	mux.HandleFunc("POST /api/download/{id}/retry", a.handleDownloadRetry)
@@ -117,7 +119,8 @@ func (a *App) handleDownloadCreate(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusAccepted, map[string]string{"id": id})
+	job, _ := a.store.GetDownload(id)
+	writeJSON(w, http.StatusAccepted, publicDownload(job, a.cfg.OutputLabel, a.cfg.FilebrowserURL))
 }
 
 func (a *App) handleDownloadGet(w http.ResponseWriter, r *http.Request) {
@@ -255,7 +258,12 @@ func (a *App) handleDownloadRetry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.store.RemoveDownload(id)
-	writeJSON(w, http.StatusAccepted, map[string]string{"id": newID})
+	newJob, ok := a.store.GetDownload(newID)
+	if !ok {
+		writeErr(w, http.StatusInternalServerError, "retry started but job missing")
+		return
+	}
+	writeJSON(w, http.StatusAccepted, publicDownload(newJob, a.cfg.OutputLabel, a.cfg.FilebrowserURL))
 }
 
 func (a *App) spaHandler() http.Handler {
