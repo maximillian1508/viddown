@@ -420,7 +420,7 @@ export default function App() {
   const recentDownloads = downloads.filter((d) => !isActiveDownload(d)).slice(0, 5);
 
   return (
-    <div className="page">
+    <div className={`page${ready ? " has-download-bar" : ""}`}>
       <header className="hero">
         <p className="brand">Viddown</p>
         <h1>Pull a stream into Filebrowser</h1>
@@ -431,7 +431,7 @@ export default function App() {
       </header>
 
       <main className="panel">
-        <form className="row" onSubmit={onProbe}>
+        <form className="row probe-row" onSubmit={onProbe}>
           <label className="field grow">
             <span>URL</span>
             <input
@@ -440,6 +440,10 @@ export default function App() {
               placeholder="https://…"
               required
               disabled={busy && probing}
+              inputMode="url"
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
             />
           </label>
           <button type="submit" disabled={busy || !url.trim()}>
@@ -493,37 +497,41 @@ export default function App() {
                             <span className="video-duration"> · {v.duration}</span>
                           )}
                         </span>
-                        {v.likelyAd && (
-                          <span className="video-badge video-badge-ad">Likely ad</span>
-                        )}
-                        {selectedQuality?.onDisk && (
-                          <span className="video-badge video-badge-saved">Already saved</span>
-                        )}
+                        <span className="video-badges">
+                          {v.likelyAd && (
+                            <span className="video-badge video-badge-ad">Likely ad</span>
+                          )}
+                          {selectedQuality?.onDisk && (
+                            <span className="video-badge video-badge-saved">Already saved</span>
+                          )}
+                        </span>
                       </span>
                     </label>
-                    <select
-                      value={qid}
-                      disabled={probing}
-                      onChange={(e) => setVideoQuality(v.id, e.target.value)}
-                      onClick={() => setFocusVideoId(v.id)}
-                      aria-label={`Quality for ${v.label}`}
-                    >
-                      {v.qualities.map((q) => (
-                        <option key={q.id} value={q.id}>
-                          {[q.label || "Stream", q.onDisk ? "· saved" : ""]
-                            .filter(Boolean)
-                            .join(" ")}
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      type="button"
-                      className="ghost preview-pick"
-                      disabled={probing}
-                      onClick={() => setFocusVideoId(v.id)}
-                    >
-                      Preview
-                    </button>
+                    <div className="video-row-actions">
+                      <select
+                        value={qid}
+                        disabled={probing}
+                        onChange={(e) => setVideoQuality(v.id, e.target.value)}
+                        onClick={() => setFocusVideoId(v.id)}
+                        aria-label={`Quality for ${v.label}`}
+                      >
+                        {v.qualities.map((q) => (
+                          <option key={q.id} value={q.id}>
+                            {[q.label || "Stream", q.onDisk ? "· saved" : ""]
+                              .filter(Boolean)
+                              .join(" ")}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        className="ghost preview-pick"
+                        disabled={probing}
+                        onClick={() => setFocusVideoId(v.id)}
+                      >
+                        Preview
+                      </button>
+                    </div>
 
                     {focused && (
                       <div className="preview-row preview-row-inline">

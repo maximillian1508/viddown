@@ -183,6 +183,13 @@ func (a *App) spaHandler() http.Handler {
 		if path == "" {
 			path = "index.html"
 		}
+		switch {
+		case path == "manifest.webmanifest" || strings.HasSuffix(path, ".webmanifest"):
+			w.Header().Set("Content-Type", "application/manifest+json")
+		case path == "sw.js" || strings.HasPrefix(path, "workbox-"):
+			w.Header().Set("Cache-Control", "no-cache")
+			w.Header().Set("Content-Type", "application/javascript")
+		}
 		if f, err := webFS.Open(path); err == nil {
 			_ = f.Close()
 			fileServer.ServeHTTP(w, r)

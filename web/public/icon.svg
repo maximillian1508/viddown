@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Viddown">
+  <rect width="512" height="512" rx="96" fill="#0f6e56"/>
+  <path fill="#f2fff9" d="M256 118c-14 0-26 12-26 26v148.2l-44.6-44.6a26 26 0 0 0-36.8 36.8l89 89a26 26 0 0 0 36.8 0l89-89a26 26 0 0 0-36.8-36.8L282 292.2V144c0-14-12-26-26-26Z"/>
+  <rect x="150" y="372" width="212" height="36" rx="12" fill="#f2fff9"/>
+</svg>
